@@ -3,14 +3,20 @@ import Stripe from 'stripe';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-});
+let stripeClient: Stripe | null = null;
 
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+const getStripe = () => {
+  if (stripeClient) return stripeClient;
+  const secret = process.env.STRIPE_SECRET_KEY;
+  if (!secret) throw new Error('STRIPE_SECRET_KEY is missing');
+  stripeClient = new Stripe(secret);
+  return stripeClient;
+};
 
 export async function POST(request: NextRequest) {
   const body = await request.text();
   const signature = request.headers.get('stripe-signature');
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
   if (!signature) {
     return NextResponse.json(
@@ -19,9 +25,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (!webhookSecret) {
+    return NextResponse.json(
+      { error: 'Missing STRIPE_WEBHOOK_SECRET' },
+      { status: 500 }
+    );
+  }
+
   let event: Stripe.Event;
 
   try {
+    const stripe = getStripe();
     event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
   } catch (err: any) {
     console.error('Webhook signature verification failed:', err.message);

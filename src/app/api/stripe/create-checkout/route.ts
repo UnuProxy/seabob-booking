@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-});
+let stripeClient: Stripe | null = null;
+
+const getStripe = () => {
+  if (stripeClient) return stripeClient;
+  const secret = process.env.STRIPE_SECRET_KEY;
+  if (!secret) throw new Error('STRIPE_SECRET_KEY is missing');
+  stripeClient = new Stripe(secret);
+  return stripeClient;
+};
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,6 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create Stripe Checkout Session
+    const stripe = getStripe();
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
