@@ -145,7 +145,7 @@ export default function DailyStockPage() {
         
         <button
           onClick={() => setShowBulkModal(true)}
-          className="flex items-center gap-2 bg-slate-900 text-white px-5 py-3 rounded-xl hover:bg-slate-800 hover:shadow-xl hover:shadow-slate-900/20 hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm transition-all font-semibold shadow-lg shadow-slate-900/10"
+          className="btn-primary"
         >
           <Layers size={20} />
           <span>Generar Stock Masivo</span>
@@ -157,7 +157,7 @@ export default function DailyStockPage() {
         <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-start">
           <button 
             onClick={() => changeDate(-1)}
-            className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors"
+            className="btn-icon text-slate-600 hover:bg-slate-100"
           >
             <ChevronLeft size={24} />
           </button>
@@ -178,7 +178,7 @@ export default function DailyStockPage() {
 
           <button 
             onClick={() => changeDate(1)}
-            className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors"
+            className="btn-icon text-slate-600 hover:bg-slate-100"
           >
             <ChevronRight size={24} />
           </button>
@@ -255,7 +255,7 @@ export default function DailyStockPage() {
                       <button
                         onClick={() => saveStock(product.id)}
                         disabled={saving === product.id}
-                        className="p-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm"
+                        className="btn-icon bg-slate-950 text-white hover:bg-slate-900 disabled:opacity-50"
                         title="Guardar cambios"
                       >
                         {saving === product.id ? (
@@ -404,7 +404,10 @@ function BulkUpdateModal({
       <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-50">
           <h2 className="text-xl font-bold text-gray-800">Generar Stock Masivo</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button
+            onClick={onClose}
+            className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+          >
             <X size={24} />
           </button>
         </div>
@@ -461,7 +464,7 @@ function BulkUpdateModal({
               <button 
                 type="button"
                 onClick={toggleAll}
-                className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
+                className="btn-ghost text-blue-700"
               >
                 {selectedProducts.length === products.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
               </button>
@@ -486,14 +489,14 @@ function BulkUpdateModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2.5 text-gray-600 hover:text-gray-800 hover:bg-gray-200/50 rounded-xl transition-colors font-semibold text-sm"
+            className="btn-outline"
           >
             Cancelar
           </button>
           <button
             onClick={handleSubmit}
             disabled={loading}
-            className="px-6 py-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 hover:shadow-lg hover:shadow-slate-900/20 hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm transition-all font-semibold text-sm flex items-center gap-2 disabled:opacity-50 disabled:hover:transform-none disabled:hover:shadow-none"
+            className="btn-primary disabled:opacity-50"
           >
             {loading && <Loader2 size={16} className="animate-spin" />}
             {loading ? 'Generando...' : 'Generar Stock'}

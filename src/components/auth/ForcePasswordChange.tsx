@@ -106,7 +106,7 @@ export default function ForcePasswordChange() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 font-bold shadow-lg shadow-slate-900/20 transition-all flex items-center justify-center gap-2 mt-2"
+            className="btn-primary w-full py-3 mt-2"
           >
             {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
             Actualizar Contraseña
@@ -116,4 +116,3 @@ export default function ForcePasswordChange() {
     </div>
   );
 }
-

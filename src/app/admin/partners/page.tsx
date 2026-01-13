@@ -8,6 +8,7 @@ import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth'
 import { db } from '@/lib/firebase/config';
 import { UserPlus, Mail, Phone, Building2, Trash2, Loader2, X, Save, AlertCircle, MapPin, Pencil, Lock } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
+import clsx from 'clsx';
 
 export default function PartnersPage() {
   const [partners, setPartners] = useState<User[]>([]);
@@ -55,14 +56,14 @@ export default function PartnersPage() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Brokers y Agencias</h1>
-          <p className="text-gray-500">Gestiona tus colaboradores externos y sus comisiones.</p>
+          <p className="text-gray-500">Gestiona tus colaboradores externos. Las comisiones se calculan según el producto reservado.</p>
         </div>
         <button 
           onClick={() => {
             setEditingPartner(null);
             setIsModalOpen(true);
           }}
-          className="bg-slate-900 text-white px-5 py-3 rounded-xl hover:bg-slate-800 hover:shadow-xl hover:shadow-slate-900/20 hover:-translate-y-0.5 transition-all font-semibold shadow-lg shadow-slate-900/10 flex items-center gap-2"
+          className="btn-primary"
         >
           <UserPlus size={20} />
           <span>Nuevo Partner</span>
@@ -79,14 +80,14 @@ export default function PartnersPage() {
                   setEditingPartner(partner);
                   setIsModalOpen(true);
                 }}
-                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                className="btn-icon text-slate-400 hover:text-blue-600 hover:bg-blue-50"
                 title="Editar"
               >
                 <Pencil size={18} />
               </button>
               <button 
                 onClick={() => handleDelete(partner.id)}
-                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                className="btn-icon text-slate-400 hover:text-rose-600 hover:bg-rose-50"
                 title="Eliminar"
               >
                 <Trash2 size={18} />
@@ -131,15 +132,9 @@ export default function PartnersPage() {
                 {partner.rol}
               </span>
 
-              <div className="text-right">
-                <span className="text-gray-400 text-xs uppercase font-semibold mr-2">Comisión</span>
-                <span className="font-bold bg-green-50 text-green-700 px-2 py-1 rounded-lg">
-                  {partner.rol === 'broker' 
-                    ? `${partner.comisiones?.broker_commission_percent || 0}%`
-                    : `${partner.comisiones?.agency_commission_percent || 0}%`
-                  }
-                </span>
-              </div>
+              <span className="text-xs text-gray-400">
+                Comisión según producto
+              </span>
             </div>
           </div>
         ))}
@@ -181,9 +176,6 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
   const [companyName, setCompanyName] = useState(initialData?.empresa_nombre || '');
   const [email, setEmail] = useState(initialData?.email || '');
   const [phone, setPhone] = useState(initialData?.whatsapp_numero || '');
-  const [commission, setCommission] = useState<number | string>(
-    initialData?.comisiones?.broker_commission_percent || initialData?.comisiones?.agency_commission_percent || 10
-  );
   const [taxId, setTaxId] = useState(initialData?.nif_cif || '');
   const [billingAddress, setBillingAddress] = useState(initialData?.direccion_facturacion || '');
   const [password, setPassword] = useState('');
@@ -216,8 +208,6 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
     setError('');
 
     try {
-      const commissionValue = commission === '' ? 0 : Number(commission);
-      
       const commonData = {
         nombre: name,
         rol: type,
@@ -226,10 +216,6 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
         whatsapp_numero: phone,
         direccion_facturacion: billingAddress,
         nif_cif: taxId,
-        comisiones: {
-          broker_commission_percent: type === 'broker' ? commissionValue : 0,
-          agency_commission_percent: type === 'agency' ? commissionValue : 0,
-        },
       };
 
       if (initialData) {
@@ -270,7 +256,10 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl shrink-0">
           <h2 className="text-xl font-bold text-gray-800">{initialData ? 'Editar Partner' : 'Nuevo Partner'}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full p-2 transition-colors">
+          <button
+            onClick={onClose}
+            className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-200"
+          >
             <X size={24} />
           </button>
         </div>
@@ -283,22 +272,18 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
             </div>
           )}
 
-          <div className="flex bg-gray-100 p-1 rounded-lg">
+          <div className="flex bg-gray-100 p-1 rounded-lg gap-2">
             <button
               type="button"
               onClick={() => setType('broker')}
-              className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${
-                type === 'broker' ? 'bg-white text-slate-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              }`}
+              className={clsx('flex-1', type === 'broker' ? 'btn-primary' : 'btn-outline')}
             >
               Broker
             </button>
             <button
               type="button"
               onClick={() => setType('agency')}
-              className={`flex-1 py-2 text-sm font-bold rounded-md transition-all ${
-                type === 'agency' ? 'bg-white text-slate-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              }`}
+              className={clsx('flex-1', type === 'agency' ? 'btn-primary' : 'btn-outline')}
             >
               Agencia
             </button>
@@ -310,7 +295,7 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium"
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium"
               required
             />
           </div>
@@ -321,7 +306,7 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
               type="text"
               value={companyName}
               onChange={e => setCompanyName(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium"
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium"
               required
             />
           </div>
@@ -337,7 +322,7 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
               value={taxId}
               onChange={e => setTaxId(e.target.value)}
               placeholder="Ej: B12345678"
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium"
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium"
               required
             />
           </div>
@@ -354,7 +339,7 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
               onChange={e => setBillingAddress(e.target.value)}
               placeholder="Calle, número, código postal, ciudad..."
               rows={2}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium resize-none"
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium resize-none"
               required
             />
           </div>
@@ -366,7 +351,7 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium disabled:opacity-60 disabled:cursor-not-allowed"
                 required
                 disabled={!!initialData}
               />
@@ -377,7 +362,7 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
                 type="tel"
                 value={phone}
                 onChange={e => setPhone(e.target.value)}
-                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium"
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium"
               />
             </div>
           </div>
@@ -405,27 +390,15 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
             </div>
           )}
 
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Comisión (%)</label>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              value={commission}
-              onChange={e => {
-                const val = e.target.value;
-                if (val === '') setCommission('');
-                else setCommission(parseFloat(val));
-              }}
-              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900 font-medium"
-            />
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-blue-700">
+            <strong>ℹ️ Comisiones:</strong> Las comisiones se calculan automáticamente según el porcentaje configurado en cada producto.
           </div>
 
           <div className="pt-4">
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 hover:shadow-lg transition-all font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+              className="btn-primary w-full py-3 disabled:opacity-50"
             >
               {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
               Guardar Partner

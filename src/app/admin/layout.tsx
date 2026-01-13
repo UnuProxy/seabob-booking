@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Menu } from 'lucide-react';
+import { usePathname } from 'next/navigation';
 
 export default function AdminLayout({
   children,
@@ -15,12 +16,23 @@ export default function AdminLayout({
   const { user, loading } = useAuthStore();
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const pathname = usePathname();
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login');
+    if (!loading) {
+      if (!user) {
+        router.push('/login');
+      } else if (user.rol === 'broker' || user.rol === 'agency') {
+        // Redirect brokers/agencies to their own dashboard
+        router.push('/broker/dashboard');
+      }
     }
   }, [user, loading, router]);
+
+  useEffect(() => {
+    // Scroll to top on route change
+    window.scrollTo(0, 0);
+  }, [pathname]);
 
   if (loading) {
     return (
@@ -33,20 +45,20 @@ export default function AdminLayout({
     );
   }
 
-  if (!user) return null;
+  if (!user || user.rol === 'broker' || user.rol === 'agency') return null;
 
   return (
-    <div className="flex min-h-screen bg-white">
+    <>
       <ForcePasswordChange />
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       
-      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+      <div className="min-h-screen bg-white lg:pl-72">
         {/* Mobile Header */}
-        <header className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shrink-0">
+        <header className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <div className="flex items-center gap-3">
             <button 
               onClick={() => setSidebarOpen(true)}
-              className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              className="btn-icon -ml-2 text-slate-600 hover:bg-slate-100"
             >
               <Menu size={24} />
             </button>
@@ -55,12 +67,12 @@ export default function AdminLayout({
         </header>
 
         {/* Main Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth">
-          <div className="max-w-7xl mx-auto">
+        <main className="p-4 lg:p-8">
+          <div className="max-w-7xl mx-auto w-full">
             {children}
           </div>
         </main>
       </div>
-    </div>
+    </>
   );
 }

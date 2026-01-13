@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase/config';
 import { Product, BookingItem, RentalType } from '@/types';
 import { useAuthStore } from '@/store/authStore';
 import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor } from 'lucide-react';
-import { format, addDays, differenceInDays } from 'date-fns';
+import { format, differenceInDays } from 'date-fns';
 
 interface BookingFormProps {
   onClose: () => void;
@@ -25,7 +25,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const [clientPhone, setClientPhone] = useState('');
   
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [endDate, setEndDate] = useState(format(addDays(new Date(), 1), 'yyyy-MM-dd')); // Default 1 day
+  const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd')); // Default same day (1 day service)
   const [items, setItems] = useState<BookingItem[]>([]);
   
   // Delivery Details
@@ -43,10 +43,21 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       try {
         const q = query(collection(db, 'products'), where('activo', '==', true));
         const snapshot = await getDocs(q);
-        setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product)));
-      } catch (err) {
-        console.error(err);
-        setError('Error al cargar productos');
+        const productsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Product));
+        setProducts(productsData);
+        
+        if (productsData.length === 0) {
+          setError('No hay productos activos disponibles. Contacta al administrador.');
+        } else {
+          setError(''); // Clear any previous errors
+        }
+      } catch (err: any) {
+        console.error('Error fetching products:', err);
+        if (err.code === 'permission-denied') {
+          setError('No tienes permiso para ver los productos. Contacta al administrador.');
+        } else {
+          setError('Error al cargar productos. Verifica tu conexión.');
+        }
       }
     };
     fetchProducts();
@@ -118,6 +129,32 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
 
       const totalAmount = calculateTotal();
       
+      // Build items with product names, prices, and commission rates
+      const itemsWithNames = items.map((item) => {
+        const product = products.find((p) => p.id === item.producto_id);
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const days = Math.max(1, differenceInDays(end, start));
+        
+        return {
+          ...item,
+          producto_nombre: product?.nombre || item.producto_id,
+          precio_unitario: product?.precio_diario || 0,
+          comision_percent: product?.comision || 0, // Store commission rate at time of booking
+        };
+      });
+      
+      // Calculate total commission for broker/agency bookings
+      let comisionTotal = 0;
+      if (user.rol === 'broker' || user.rol === 'agency') {
+        const days = Math.max(1, differenceInDays(new Date(endDate), new Date(startDate)));
+        comisionTotal = itemsWithNames.reduce((total, item) => {
+          const itemPrice = (item.precio_unitario || 0) * item.cantidad * days;
+          const commissionRate = (item.comision_percent || 0) / 100;
+          return total + (itemPrice * commissionRate);
+        }, 0);
+      }
+      
       const bookingData = {
         numero_reserva: ref,
         cliente: {
@@ -126,12 +163,16 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
           telefono: clientPhone,
           whatsapp: clientPhone
         },
-        items,
+        items: itemsWithNames,
         fecha_inicio: startDate,
         fecha_fin: endDate,
         precio_total: totalAmount,
         estado: status,
         acuerdo_firmado: false,
+        
+        // Commission tracking (for broker/agency bookings)
+        comision_total: comisionTotal,
+        comision_pagada: 0,
         
         // Delivery Details
         ubicacion_entrega: deliveryLocation,
@@ -147,7 +188,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
 
         notas: notes,
         creado_en: serverTimestamp(),
-        creado_por: user.id
+        creado_por: user.id,
+        ...(user.rol === 'broker' ? { broker_id: user.id } : {}),
+        ...(user.rol === 'agency' ? { agency_id: user.id } : {})
       };
 
       // 1. Create booking
@@ -212,12 +255,15 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             <h2 className="text-2xl font-bold text-gray-800">Nueva Reserva</h2>
             <p className="text-gray-500 text-sm mt-1">Rellena los datos para crear un nuevo alquiler.</p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full p-2 transition-colors">
+          <button
+            onClick={onClose}
+            className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-200"
+          >
             <X size={24} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-8 space-y-8">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-8 space-y-6 bg-slate-50">
           {error && (
             <div className="bg-red-50 text-red-700 p-4 rounded-xl flex items-center gap-2 border border-red-100">
               <ShoppingBag size={20} />
@@ -226,19 +272,27 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
           )}
 
           {/* Section 1: Client Info */}
-          <section>
-            <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800 mb-4">
-              <User className="text-blue-600" size={20} />
-              Datos del Cliente
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
+                1
+              </div>
+              <div>
+                <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
+                  <User className="text-blue-600" size={20} />
+                  Datos del Cliente
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">Información para contactar y enviar confirmaciones.</p>
+              </div>
+            </div>
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Nombre Completo</label>
                 <input
                   type="text"
                   value={clientName}
                   onChange={e => setClientName(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                   placeholder="Ej: Juan Pérez"
                   required
                 />
@@ -249,7 +303,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                   type="email"
                   value={clientEmail}
                   onChange={e => setClientEmail(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                   placeholder="juan@ejemplo.com"
                   required
                 />
@@ -260,16 +314,17 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                   type="tel"
                   value={clientPhone}
                   onChange={e => setClientPhone(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                   placeholder="+34 600 000 000"
                 />
+                <p className="text-xs text-gray-500 mt-2">Úsalo para coordinar la entrega y resolver dudas.</p>
               </div>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Estado Inicial</label>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as any)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                 >
                   <option value="confirmada">Confirmada</option>
                   <option value="pendiente">Pendiente</option>
@@ -278,22 +333,28 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             </div>
           </section>
 
-          <hr className="border-gray-100" />
-
           {/* Section 2: Dates & Details */}
-          <section>
-            <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800 mb-4">
-              <Calendar className="text-blue-600" size={20} />
-              Fechas del Alquiler
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
+                2
+              </div>
+              <div>
+                <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
+                  <Calendar className="text-blue-600" size={20} />
+                  Fechas del Alquiler
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">Define el periodo para calcular la duración y el total.</p>
+              </div>
+            </div>
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Fecha Inicio</label>
                 <input
                   type="date"
                   value={startDate}
                   onChange={e => setStartDate(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                   required
                 />
               </div>
@@ -304,7 +365,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                   value={endDate}
                   min={startDate}
                   onChange={e => setEndDate(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                   required
                 />
               </div>
@@ -314,21 +375,27 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             </p>
           </section>
 
-          <hr className="border-gray-100" />
-
           {/* Section 3: Delivery Details */}
-          <section>
-             <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800 mb-4">
-                <Anchor className="text-blue-600" size={20} />
-                Detalles de Entrega
-             </h3>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+             <div className="flex items-start gap-4">
+               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
+                 3
+               </div>
+               <div>
+                 <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
+                    <Anchor className="text-blue-600" size={20} />
+                    Detalles de Entrega
+                 </h3>
+                 <p className="text-sm text-gray-500 mt-1">Indica dónde y cuándo entregar el equipo.</p>
+               </div>
+             </div>
+             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                    <label className="block text-sm font-semibold text-gray-700 mb-2">Ubicación *</label>
                    <select
                       value={deliveryLocation}
                       onChange={(e) => setDeliveryLocation(e.target.value as any)}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                       required
                    >
                       <option value="marina_ibiza">Marina Ibiza</option>
@@ -343,10 +410,10 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                       type="time"
                       value={deliveryTime}
                       onChange={e => setDeliveryTime(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                       required
                    />
-                   <p className="text-xs text-gray-500 mt-1">Hora a la que se entregará el equipo</p>
+                   <p className="text-xs text-gray-500 mt-1">Hora a la que se entregará el equipo.</p>
                 </div>
                 <div>
                    <label className="block text-sm font-semibold text-gray-700 mb-2">Nombre del Barco</label>
@@ -355,7 +422,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                       value={boatName}
                       onChange={e => setBoatName(e.target.value)}
                       placeholder="Ej: Blue Pearl"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                    />
                 </div>
                 <div>
@@ -365,25 +432,31 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                       value={dockingNumber}
                       onChange={e => setDockingNumber(e.target.value)}
                       placeholder="Ej: H-12"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                    />
                 </div>
              </div>
           </section>
 
-          <hr className="border-gray-100" />
-
           {/* Section 4: Items */}
-          <section>
+          <section className="rounded-2xl border-2 border-blue-200 bg-blue-50/40 p-6 shadow-sm">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
-                <ShoppingBag className="text-blue-600" size={20} />
-                Productos
-              </h3>
+              <div className="flex items-start gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white text-sm font-semibold shadow-sm">
+                  4
+                </div>
+                <div>
+                  <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
+                    <ShoppingBag className="text-blue-700" size={20} />
+                    Productos
+                  </h3>
+                  <p className="text-sm text-gray-600 mt-1">Añade los equipos y cantidades para esta reserva.</p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={addItem}
-                className="text-sm font-semibold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                className="btn-ghost text-blue-700"
               >
                 <Plus size={16} /> Añadir Producto
               </button>
@@ -391,7 +464,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
 
             <div className="space-y-4">
               {items.map((item, index) => (
-                <div key={index} className="flex flex-col md:flex-row gap-4 items-start md:items-end bg-gray-50 p-4 rounded-xl border border-gray-100 relative group">
+                <div key={index} className="flex flex-col md:flex-row gap-4 items-start md:items-end bg-white/90 p-4 rounded-xl border border-blue-100 relative group text-gray-900 shadow-sm">
                   <div className="flex-1 w-full">
                     <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Producto</label>
                     <select
@@ -419,7 +492,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                   <button
                     type="button"
                     onClick={() => removeItem(index)}
-                    className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors absolute top-2 right-2 md:static"
+                    className="btn-icon text-rose-400 hover:text-rose-600 hover:bg-rose-50 absolute top-2 right-2 md:static"
                   >
                     <Trash2 size={18} />
                   </button>
@@ -427,21 +500,29 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
               ))}
 
               {items.length === 0 && (
-                <div className="text-center py-8 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl text-gray-400">
-                  No hay productos seleccionados. Añade uno para continuar.
+                <div className="text-center py-8 bg-white/80 border-2 border-dashed border-blue-200 rounded-xl text-gray-600">
+                  No hay productos seleccionados. Usa “Añadir Producto” para empezar.
                 </div>
               )}
             </div>
           </section>
           
           {/* Section 5: Notes */}
-          <section>
-             <h3 className="text-sm font-bold text-gray-700 mb-2">Notas Adicionales</h3>
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+             <div className="flex items-start gap-4">
+               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
+                 5
+               </div>
+               <div>
+                 <h3 className="text-lg font-bold text-gray-800">Notas Adicionales</h3>
+                 <p className="text-sm text-gray-500 mt-1">Agrega instrucciones especiales o contexto interno.</p>
+               </div>
+             </div>
              <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={3}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900"
+                className="w-full mt-4 px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900"
                 placeholder="Instrucciones especiales..."
              />
           </section>
@@ -459,14 +540,14 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-3 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-xl transition-colors font-semibold"
+              className="btn-outline"
             >
               Cancelar
             </button>
             <button
               onClick={handleSubmit}
               disabled={loading || items.length === 0}
-              className="px-8 py-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0 transition-all font-semibold flex items-center gap-2 disabled:opacity-50 disabled:hover:transform-none disabled:shadow-none"
+              className="btn-primary disabled:opacity-50"
             >
               {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
               Crear Reserva
@@ -477,3 +558,4 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     </div>
   );
 }
+

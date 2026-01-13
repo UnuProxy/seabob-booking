@@ -14,17 +14,16 @@ interface ProductFormProps {
 
 export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormProps) {
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState<Partial<Product>>(
-    productToEdit || {
-      nombre: '',
-      descripcion: '',
-      precio_diario: 0,
-      precio_hora: 0,
-      tipo: 'seabob',
-      imagen_url: '',
-      activo: true,
-    }
-  );
+  const [formData, setFormData] = useState<Partial<Product>>({
+    nombre: '',
+    descripcion: '',
+    precio_diario: undefined,
+    comision: undefined,
+    tipo: 'seabob',
+    imagen_url: '',
+    activo: true,
+    ...productToEdit,
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,20 +32,18 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
     try {
       const productData = {
         ...formData,
-        precio_diario: Number(formData.precio_diario),
-        precio_hora: Number(formData.precio_hora),
+        precio_diario: Number(formData.precio_diario) || 0,
+        comision: Number(formData.comision) || 0,
         creado_por: auth.currentUser?.uid,
         updated_at: serverTimestamp(),
       };
 
       if (productToEdit?.id) {
-        // Update existing
         await updateDoc(doc(db, 'products', productToEdit.id), productData);
       } else {
-        // Create new
         await addDoc(collection(db, 'products'), {
           ...productData,
-          creado_en: serverTimestamp(), // Use server timestamp for creation
+          creado_en: serverTimestamp(),
         });
       }
 
@@ -60,6 +57,12 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
     }
   };
 
+  // Calculate example commission
+  const examplePrice = 500;
+  const exampleCommission = formData.comision 
+    ? (examplePrice * (formData.comision / 100)).toFixed(2)
+    : '0.00';
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -67,7 +70,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
           <h2 className="text-xl font-bold text-gray-800">
             {productToEdit ? 'Editar Producto' : 'Nuevo Producto'}
           </h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+          <button onClick={onClose} className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-100">
             <X size={24} />
           </button>
         </div>
@@ -128,25 +131,38 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
                 min="0"
                 step="0.01"
                 required
-                value={formData.precio_diario}
-                onChange={(e) => setFormData({ ...formData, precio_diario: Number(e.target.value) })}
+                value={formData.precio_diario ?? ''}
+                onChange={(e) => setFormData({ ...formData, precio_diario: e.target.value === '' ? undefined : Number(e.target.value) })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                placeholder="0"
               />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Precio por Hora (€)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Comisión Broker/Agencia (%)
+              </label>
               <input
                 type="number"
                 min="0"
-                step="0.01"
-                value={formData.precio_hora}
-                onChange={(e) => setFormData({ ...formData, precio_hora: Number(e.target.value) })}
+                max="100"
+                step="1"
+                value={formData.comision ?? ''}
+                onChange={(e) => setFormData({ ...formData, comision: e.target.value === '' ? undefined : Number(e.target.value) })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                placeholder="ej. 15"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                Porcentaje que se paga a brokers/agencias cuando reservan este producto.
+              </p>
+              {formData.comision !== undefined && formData.comision > 0 && (
+                <p className="text-xs text-green-600 mt-1 font-medium">
+                  Ejemplo: en una reserva de €{examplePrice}, la comisión sería €{exampleCommission}
+                </p>
+              )}
             </div>
 
-             <div className="col-span-2">
+            <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">URL Imagen</label>
               <input
                 type="url"
@@ -162,14 +178,14 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+              className="btn-outline"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+              className="btn-primary disabled:opacity-50"
             >
               {loading ? 'Guardando...' : 'Guardar Producto'}
             </button>
@@ -179,4 +195,3 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
     </div>
   );
 }
-

@@ -1,14 +1,156 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import Stripe from 'stripe';
+
+// Initialize Stripe only if keys are present
+const stripe = process.env.STRIPE_SECRET_KEY 
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: '2025-11-17.clover',
+    })
+  : null;
+
+const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 export async function POST(request: NextRequest) {
   try {
-    // Stripe not configured yet; short-circuit to avoid build failures.
-    return NextResponse.json(
-      { error: 'Stripe not configured' },
-      { status: 503 }
-    );
+    // Check if Stripe is configured
+    if (!stripe || !webhookSecret) {
+      console.log('Stripe not configured - skipping webhook');
+      return NextResponse.json(
+        { error: 'Stripe not configured' },
+        { status: 503 }
+      );
+    }
+
+    const body = await request.text();
+    const signature = request.headers.get('stripe-signature');
+
+    if (!signature) {
+      return NextResponse.json(
+        { error: 'No signature' },
+        { status: 400 }
+      );
+    }
+
+    // Verify webhook signature
+    let event: Stripe.Event;
+    try {
+      event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    } catch (err: any) {
+      console.error('⚠️  Webhook signature verification failed:', err.message);
+      return NextResponse.json(
+        { error: `Webhook Error: ${err.message}` },
+        { status: 400 }
+      );
+    }
+
+    // Handle the event
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        
+        // Get booking ID from metadata
+        const bookingId = session.metadata?.booking_id;
+        if (!bookingId) {
+          console.error('No booking_id in session metadata');
+          break;
+        }
+
+        console.log(`✅ Payment successful for booking: ${bookingId}`);
+        console.log(`   Session ID: ${session.id}`);
+        console.log(`   Payment Intent: ${session.payment_intent}`);
+        console.log(`   Amount: ${session.amount_total ? session.amount_total / 100 : 0} ${session.currency?.toUpperCase()}`);
+
+        // Update booking in Firestore
+        const bookingRef = doc(db, 'bookings', bookingId);
+        
+        // Check if booking exists
+        const bookingSnap = await getDoc(bookingRef);
+        if (!bookingSnap.exists()) {
+          console.error(`Booking ${bookingId} not found`);
+          break;
+        }
+
+        await updateDoc(bookingRef, {
+          pago_realizado: true,
+          pago_realizado_en: serverTimestamp(),
+          pago_metodo: 'stripe',
+          pago_referencia: session.payment_intent?.toString() || session.id,
+          stripe_payment_intent_id: session.payment_intent?.toString(),
+          stripe_checkout_session_id: session.id,
+          estado: 'confirmada', // Auto-confirm when paid
+          confirmado_en: serverTimestamp(),
+          updated_at: serverTimestamp(),
+        });
+
+        console.log(`✅ Booking ${bookingId} marked as paid and confirmed`);
+        break;
+      }
+
+      case 'charge.refunded': {
+        const charge = event.data.object as Stripe.Charge;
+        
+        console.log(`🔄 Refund processed for payment intent: ${charge.payment_intent}`);
+        console.log(`   Refund amount: ${charge.amount_refunded / 100} ${charge.currency.toUpperCase()}`);
+        
+        // Find booking by payment intent ID and auto-update refund
+        if (charge.payment_intent) {
+          try {
+            const bookingsRef = collection(db, 'bookings');
+            const q = query(
+              bookingsRef, 
+              where('stripe_payment_intent_id', '==', charge.payment_intent.toString())
+            );
+            const snapshot = await getDocs(q);
+            
+            if (!snapshot.empty) {
+              const bookingDoc = snapshot.docs[0];
+              const bookingRef = doc(db, 'bookings', bookingDoc.id);
+              
+              await updateDoc(bookingRef, {
+                reembolso_realizado: true,
+                reembolso_monto: charge.amount_refunded / 100,
+                reembolso_fecha: serverTimestamp(),
+                reembolso_metodo: 'stripe',
+                reembolso_motivo: 'Reembolso procesado automáticamente por Stripe',
+                reembolso_referencia: charge.id,
+                stripe_refund_id: charge.id,
+                estado: 'cancelada',
+                updated_at: serverTimestamp(),
+              });
+              
+              console.log(`✅ Booking ${bookingDoc.id} auto-updated with refund`);
+            } else {
+              console.log(`⚠️ No booking found with payment_intent: ${charge.payment_intent}`);
+            }
+          } catch (error) {
+            console.error('Error auto-updating refund:', error);
+          }
+        }
+        
+        break;
+      }
+
+      case 'payment_intent.succeeded': {
+        const paymentIntent = event.data.object as Stripe.PaymentIntent;
+        console.log(`💳 Payment intent succeeded: ${paymentIntent.id}`);
+        break;
+      }
+
+      case 'payment_intent.payment_failed': {
+        const paymentIntent = event.data.object as Stripe.PaymentIntent;
+        console.error(`❌ Payment intent failed: ${paymentIntent.id}`);
+        // Optionally notify admin or customer
+        break;
+      }
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
+    }
+
+    return NextResponse.json({ received: true });
+
   } catch (err: any) {
     console.error('Webhook error:', err?.message || err);
     return NextResponse.json(

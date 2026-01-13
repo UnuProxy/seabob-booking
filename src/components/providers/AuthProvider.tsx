@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase/config';
 import { useAuthStore } from '@/store/authStore';
 import { User } from '@/types';
@@ -21,8 +21,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           if (userDoc.exists()) {
             setUser({ id: firebaseUser.uid, ...userDoc.data() } as User);
+            await setDoc(
+              userDocRef,
+              { last_login_at: serverTimestamp(), last_seen_at: serverTimestamp() },
+              { merge: true }
+            );
           } else {
             // AUTO-CREATE ADMIN PROFILE FOR FIRST USER
+            const nowIso = new Date().toISOString();
             const newUser = {
               email: firebaseUser.email!,
               nombre: firebaseUser.displayName || 'Admin',
@@ -30,11 +36,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               tipo_entidad: 'individual',
               whatsapp_conectado: false,
               activo: true,
-              creado_en: new Date().toISOString(),
-              permisos: ['all']
+              creado_en: nowIso,
+              permisos: ['all'],
+              last_login_at: nowIso,
+              last_seen_at: nowIso
             };
             
-            await setDoc(userDocRef, newUser);
+            await setDoc(userDocRef, {
+              ...newUser,
+              creado_en: serverTimestamp(),
+              last_login_at: serverTimestamp(),
+              last_seen_at: serverTimestamp()
+            });
             setUser({ id: firebaseUser.uid, ...newUser } as unknown as User);
           }
         } else {
@@ -53,4 +66,3 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return <>{children}</>;
 }
-

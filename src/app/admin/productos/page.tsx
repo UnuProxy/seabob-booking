@@ -50,11 +50,11 @@ export default function ProductsPage() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">Inventario de Productos</h1>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Inventario de Productos</h1>
         <button 
           onClick={handleNew}
-          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 font-medium"
+          className="btn-primary w-full sm:w-auto"
         >
           + Nuevo Producto
         </button>
@@ -107,14 +107,14 @@ export default function ProductsPage() {
                 <div className="flex gap-2">
                   <button 
                     onClick={() => handleEdit(product)}
-                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
+                    className="btn-icon text-blue-600 hover:bg-blue-50"
                     title="Editar"
                   >
                     <Edit size={18} />
                   </button>
                   <button 
                     onClick={() => handleDelete(product.id)}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded-full transition-colors"
+                    className="btn-icon text-rose-600 hover:bg-rose-50"
                     title="Eliminar"
                   >
                     <Trash2 size={18} />
@@ -130,7 +130,7 @@ export default function ProductsPage() {
             <p className="text-gray-500">No hay productos registrados.</p>
             <button 
               onClick={handleNew}
-              className="mt-2 text-blue-600 hover:underline font-medium"
+              className="btn-ghost mt-2 text-blue-700"
             >
               Crear el primer producto
             </button>
@@ -150,4 +150,3 @@ export default function ProductsPage() {
     </div>
   );
 }
-

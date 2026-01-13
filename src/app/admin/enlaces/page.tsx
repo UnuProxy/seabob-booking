@@ -67,7 +67,7 @@ export default function WhatsAppLinksPage() {
         </div>
         <button 
           onClick={() => setIsModalOpen(true)}
-          className="bg-green-600 text-white px-5 py-3 rounded-xl hover:bg-green-700 hover:shadow-xl hover:shadow-green-900/20 transition-all font-semibold flex items-center gap-2 shadow-lg shadow-green-900/10"
+          className="btn-primary"
         >
           <Plus size={20} />
           <span>Nuevo Enlace</span>
@@ -93,7 +93,7 @@ export default function WhatsAppLinksPage() {
             <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
               <button 
                 onClick={() => handleDelete(link.id)}
-                className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                className="btn-icon text-slate-300 hover:text-rose-500 hover:bg-rose-50"
                 title="Eliminar"
               >
                 <Trash2 size={18} />
@@ -117,7 +117,7 @@ export default function WhatsAppLinksPage() {
             <div className="flex gap-3">
               <button 
                 onClick={() => copyToClipboard(link.enlace_publico)}
-                className="flex-1 bg-white border border-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-50 font-medium text-sm flex items-center justify-center gap-2 transition-colors shadow-sm"
+                className="btn-outline flex-1"
               >
                 <Copy size={16} />
                 Copiar
@@ -126,7 +126,7 @@ export default function WhatsAppLinksPage() {
                 href={link.enlace_publico}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 font-medium text-sm flex items-center justify-center gap-2 transition-colors shadow-green-900/20 shadow-md"
+                className="btn-primary flex-1"
               >
                 <ExternalLink size={16} />
                 Probar
@@ -181,7 +181,10 @@ function LinkGeneratorForm({ onClose }: { onClose: () => void }) {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl flex-shrink-0">
           <h2 className="text-xl font-bold text-gray-800">Generar Enlace WhatsApp</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-full p-2 transition-colors">
+          <button
+            onClick={onClose}
+            className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-200"
+          >
             <X size={24} />
           </button>
         </div>
@@ -225,7 +228,7 @@ function LinkGeneratorForm({ onClose }: { onClose: () => void }) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 font-bold flex items-center justify-center gap-2 shadow-lg shadow-green-900/20"
+              className="btn-primary w-full py-3"
             >
               {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
               Generar Enlace
@@ -236,4 +239,3 @@ function LinkGeneratorForm({ onClose }: { onClose: () => void }) {
     </div>
   );
 }
-
