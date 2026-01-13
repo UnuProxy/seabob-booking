@@ -73,6 +73,7 @@ export default function BrokerDashboard() {
         // If index error, try without orderBy
         if (error.code === 'failed-precondition') {
           try {
+            const bookingsRef = collection(db, 'bookings');
             const q2 = query(
               bookingsRef,
               where(user.rol === 'broker' ? 'broker_id' : 'agency_id', '==', user.id)

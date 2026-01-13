@@ -99,7 +99,7 @@ export default function ProductsPage() {
               <div className="flex items-center justify-between mt-auto pt-4 border-t border-gray-100">
                 <div className="text-sm">
                   <div className="font-semibold text-gray-900">€{product.precio_diario} <span className="text-gray-500 font-normal">/ día</span></div>
-                  {product.precio_hora > 0 && (
+                  {product.precio_hora && product.precio_hora > 0 && (
                     <div className="text-gray-500">€{product.precio_hora} / hora</div>
                   )}
                 </div>
@@ -113,7 +113,7 @@ export default function ProductsPage() {
                     <Edit size={18} />
                   </button>
                   <button 
-                    onClick={() => handleDelete(product.id)}
+                    onClick={() => product.id && handleDelete(product.id)}
                     className="btn-icon text-rose-600 hover:bg-rose-50"
                     title="Eliminar"
                   >

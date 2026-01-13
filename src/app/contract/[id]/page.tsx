@@ -882,7 +882,7 @@ export default function ContractPage() {
                     <p>
                       <strong>{clause.title}</strong> {clause.text}
                     </p>
-                    {clause.subclauses && (
+                    {'subclauses' in clause && clause.subclauses && (
                       <ul className="list-disc pl-5 space-y-1">
                         {clause.subclauses.map((item) => (
                           <li key={item}>{item}</li>

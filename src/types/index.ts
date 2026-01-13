@@ -10,7 +10,6 @@ export type PaymentMethod =
   | 'transferencia'   // Bank transfer
   | 'tarjeta'         // Card payment (manual)
   | 'otro';           // Other
-export type PaymentMethod = 'transferencia' | 'efectivo' | 'stripe' | 'otro';
 
 export interface User {
   id: string;
@@ -41,6 +40,7 @@ export interface Product {
   nombre: string;
   descripcion: string;
   precio_diario: number;
+  precio_hora?: number; // Optional hourly rate
   comision: number; // Percentage (e.g., 15 = 15%)
   tipo: ProductType;
   imagen_url: string;

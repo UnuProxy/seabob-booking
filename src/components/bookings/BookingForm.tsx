@@ -64,7 +64,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   }, []);
 
   const addItem = () => {
-    if (products.length === 0) return;
+    if (products.length === 0 || !products[0].id) return;
     setItems([
       ...items, 
       { 
@@ -99,7 +99,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         const days = Math.max(1, differenceInDays(end, start));
         price = product.precio_diario * days * item.cantidad;
       } else {
-        price = product.precio_hora * item.duracion * item.cantidad;
+        price = (product.precio_hora || 0) * item.duracion * item.cantidad;
       }
       return acc + price;
     }, 0);

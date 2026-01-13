@@ -213,7 +213,7 @@ export default function DailyStockPage() {
       ) : (
         <div className="grid gap-4">
           {products.map(product => {
-            const stock = stocks[product.id] || { cantidad_disponible: 0, cantidad_reservada: 0 };
+            const stock = stocks[product.id || ''] || { cantidad_disponible: 0, cantidad_reservada: 0 };
             
             return (
               <div key={product.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between group hover:border-blue-200 transition-colors gap-6">
@@ -249,11 +249,11 @@ export default function DailyStockPage() {
                         type="number"
                         min="0"
                         value={stock.cantidad_disponible || ''}
-                        onChange={(e) => handleStockChange(product.id, e.target.value)}
+                        onChange={(e) => product.id && handleStockChange(product.id, e.target.value)}
                         className="w-24 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-right font-mono text-lg"
                       />
                       <button
-                        onClick={() => saveStock(product.id)}
+                        onClick={() => product.id && saveStock(product.id)}
                         disabled={saving === product.id}
                         className="btn-icon bg-slate-950 text-white hover:bg-slate-900 disabled:opacity-50"
                         title="Guardar cambios"
@@ -395,7 +395,7 @@ function BulkUpdateModal({
     if (selectedProducts.length === products.length) {
       setSelectedProducts([]);
     } else {
-      setSelectedProducts(products.map(p => p.id));
+      setSelectedProducts(products.map(p => p.id).filter((id): id is string => id !== undefined));
     }
   };
 
@@ -474,8 +474,8 @@ function BulkUpdateModal({
                 <label key={product.id} className="flex items-center gap-3 p-2.5 hover:bg-white hover:shadow-sm rounded-lg cursor-pointer transition-all border border-transparent hover:border-gray-100">
                   <input
                     type="checkbox"
-                    checked={selectedProducts.includes(product.id)}
-                    onChange={() => toggleProduct(product.id)}
+                    checked={product.id ? selectedProducts.includes(product.id) : false}
+                    onChange={() => product.id && toggleProduct(product.id)}
                     className="w-5 h-5 text-slate-900 rounded border-gray-300 focus:ring-slate-900 cursor-pointer"
                   />
                   <span className="text-sm text-gray-700 font-medium select-none">{product.nombre}</span>

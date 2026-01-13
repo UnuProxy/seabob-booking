@@ -131,7 +131,7 @@ export default function PublicBookingPage() {
     setQuantities((prev) => {
       const next = { ...prev };
       products.forEach((product) => {
-        if (next[product.id] === undefined) {
+        if (product.id && next[product.id] === undefined) {
           next[product.id] = 0;
         }
       });
@@ -467,7 +467,7 @@ export default function PublicBookingPage() {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {products.map((product) => {
-                    const qty = quantities[product.id] || 0;
+                    const qty = quantities[product.id || ''] || 0;
                     return (
                       <div
                         key={product.id}
@@ -491,7 +491,7 @@ export default function PublicBookingPage() {
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => updateQuantity(product.id, -1)}
+                            onClick={() => product.id && updateQuantity(product.id, -1)}
                             className="btn-icon h-9 w-9 border border-slate-200 text-slate-500 hover:bg-slate-50"
                           >
                             <Minus size={16} />
@@ -499,7 +499,7 @@ export default function PublicBookingPage() {
                           <div className="min-w-[32px] text-center font-semibold text-slate-900">{qty}</div>
                           <button
                             type="button"
-                            onClick={() => updateQuantity(product.id, 1)}
+                            onClick={() => product.id && updateQuantity(product.id, 1)}
                             className="btn-icon h-9 w-9 border border-blue-200 text-blue-600 hover:bg-blue-50"
                           >
                             <Plus size={16} />
