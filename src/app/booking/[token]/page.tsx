@@ -263,12 +263,16 @@ export default function PublicBookingPage() {
         });
 
         if (response.ok) {
-          const { checkout_url, session_id } = await response.json();
-          paymentUrl = checkout_url;
-          await updateDoc(doc(db, 'bookings', bookingId), {
-            stripe_checkout_session_id: session_id,
-            stripe_payment_link: checkout_url,
-          });
+          const { url, sessionId } = await response.json();
+          paymentUrl = url;
+          
+          // Only update if we got valid values
+          if (url && sessionId) {
+            await updateDoc(doc(db, 'bookings', bookingId), {
+              stripe_checkout_session_id: sessionId,
+              stripe_payment_link: url,
+            });
+          }
         }
       } catch (paymentError) {
         console.error('Error creating payment link:', paymentError);

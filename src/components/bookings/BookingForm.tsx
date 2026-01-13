@@ -216,13 +216,15 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         });
 
         if (response.ok) {
-          const { checkout_url, session_id } = await response.json();
+          const { url, sessionId } = await response.json();
           
-          // Update booking with payment link
-          await updateDoc(doc(db, 'bookings', bookingId), {
-            stripe_checkout_session_id: session_id,
-            stripe_payment_link: checkout_url,
-          });
+          // Update booking with payment link (only if we got valid values)
+          if (url && sessionId) {
+            await updateDoc(doc(db, 'bookings', bookingId), {
+              stripe_checkout_session_id: sessionId,
+              stripe_payment_link: url,
+            });
+          }
         } else {
           console.error('Failed to create payment link');
           // Continue anyway - booking is created, payment link can be generated later
