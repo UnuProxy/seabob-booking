@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, addDoc, getDocs, query, where, serverTimestamp, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, where, serverTimestamp, doc, updateDoc, getDoc, writeBatch, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Product, BookingItem, RentalType, DailyStock } from '@/types';
 import { useAuthStore } from '@/store/authStore';
@@ -283,7 +283,38 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       const docRef = await addDoc(collection(db, 'bookings'), bookingData);
       const bookingId = docRef.id;
 
-      // 2. Generate Stripe payment link
+      // 2. Reserve stock immediately (hold during payment/signature window)
+      try {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const days = eachDayOfInterval({ start, end });
+        const batch = writeBatch(db);
+
+        days.forEach((day) => {
+          const dateStr = format(day, 'yyyy-MM-dd');
+          itemsWithNames.forEach((item) => {
+            const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
+            batch.set(
+              stockRef,
+              {
+                fecha: dateStr,
+                producto_id: item.producto_id,
+                cantidad_reservada: increment(item.cantidad),
+                actualizado_por: user.id,
+                timestamp: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          });
+        });
+
+        await batch.commit();
+      } catch (stockError) {
+        console.error('Error reserving stock:', stockError);
+        // If stock reservation fails, we still keep the booking, but warn in console
+      }
+
+      // 3. Generate Stripe payment link
       try {
         const response = await fetch('/api/stripe/create-checkout', {
           method: 'POST',
@@ -298,6 +329,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             clientName,
             bookingRef: ref,
             token,
+            expiresAt: Math.floor(expiracion.getTime() / 1000),
           }),
         });
 

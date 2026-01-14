@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, deleteDoc, doc, serverTimestamp, writeBatch, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
@@ -23,7 +23,7 @@ import {
   Trash2,
   Ban
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
 
@@ -140,6 +140,14 @@ export default function BrokerReservasPage() {
     return () => unsubscribe();
   }, [user]);
 
+  // Auto-expire bookings that exceeded their hold window
+  useEffect(() => {
+    if (!bookings.length) return;
+    bookings.forEach((booking) => {
+      expireBookingIfNeeded(booking);
+    });
+  }, [bookings]);
+
   const copyContractLink = (booking: Booking) => {
     if (!booking.token_acceso) {
       alert('Esta reserva no tiene enlace público generado.');
@@ -150,12 +158,63 @@ export default function BrokerReservasPage() {
     alert('Enlace del contrato copiado al portapapeles');
   };
 
+  const adjustStockReservation = async (bookingToUpdate: Booking, delta: number) => {
+    if (!bookingToUpdate?.items?.length) return;
+    const start = getDate(bookingToUpdate.fecha_inicio);
+    const end = getDate(bookingToUpdate.fecha_fin);
+    const days = eachDayOfInterval({ start, end });
+    const batch = writeBatch(db);
+
+    days.forEach((day) => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      bookingToUpdate.items.forEach((item) => {
+        const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
+        batch.set(
+          stockRef,
+          {
+            fecha: dateStr,
+            producto_id: item.producto_id,
+            cantidad_reservada: increment(delta * item.cantidad),
+            actualizado_por: user?.id || 'system',
+            timestamp: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      });
+    });
+
+    await batch.commit();
+  };
+
+  const expireBookingIfNeeded = async (booking: Booking) => {
+    if (!booking.expiracion) return;
+    if (booking.pago_realizado || booking.acuerdo_firmado) return;
+    if (booking.expirado || booking.estado === 'expirada') return;
+
+    const expirationDate = getDate(booking.expiracion);
+    if (new Date() <= expirationDate) return;
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        estado: 'expirada',
+        expirado: true,
+        updated_at: serverTimestamp(),
+      });
+      await adjustStockReservation(booking, -1);
+    } catch (error) {
+      console.error('Error expiring booking:', error);
+    }
+  };
+
   const handleCancelBooking = async (booking: Booking) => {
     if (!confirm(`¿Estás seguro de que deseas cancelar la reserva ${booking.numero_reserva}?\n\nEsto cambiará el estado a "cancelada" pero mantendrá el registro.`)) {
       return;
     }
 
     try {
+      if (booking.estado !== 'expirada') {
+        await adjustStockReservation(booking, -1);
+      }
       await updateDoc(doc(db, 'bookings', booking.id), {
         estado: 'cancelada',
         updated_at: serverTimestamp()
@@ -178,6 +237,9 @@ export default function BrokerReservasPage() {
     }
 
     try {
+      if (booking.estado !== 'expirada') {
+        await adjustStockReservation(booking, -1);
+      }
       await deleteDoc(doc(db, 'bookings', booking.id));
       alert('Reserva eliminada permanentemente');
     } catch (error) {
@@ -212,6 +274,7 @@ export default function BrokerReservasPage() {
       case 'pendiente': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
       case 'completada': return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'cancelada': return 'bg-red-100 text-red-700 border-red-200';
+      case 'expirada': return 'bg-orange-100 text-orange-700 border-orange-200';
       default: return 'bg-gray-100 text-gray-700 border-gray-200';
     }
   };
@@ -222,6 +285,7 @@ export default function BrokerReservasPage() {
       case 'pendiente': return <Clock size={16} />;
       case 'completada': return <FileCheck size={16} />;
       case 'cancelada': return <XCircle size={16} />;
+      case 'expirada': return <Clock size={16} />;
       default: return <Clock size={16} />;
     }
   };
@@ -310,6 +374,7 @@ export default function BrokerReservasPage() {
               <option value="confirmada">Confirmada</option>
               <option value="completada">Completada</option>
               <option value="cancelada">Cancelada</option>
+              <option value="expirada">Expirada</option>
             </select>
           </div>
         </div>
@@ -408,7 +473,7 @@ export default function BrokerReservasPage() {
                       >
                         <Eye size={18} />
                       </button>
-                      {booking.estado !== 'cancelada' && (
+                      {booking.estado !== 'cancelada' && booking.estado !== 'expirada' && (
                         <button
                           onClick={() => handleCancelBooking(booking)}
                           className="btn-icon text-slate-600 hover:bg-orange-50 hover:text-orange-600"

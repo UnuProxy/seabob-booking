@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, deleteDoc, doc, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, deleteDoc, doc, where, getDocs, updateDoc, serverTimestamp, writeBatch, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
@@ -30,7 +30,7 @@ import {
   Euro,
   Ban
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, eachDayOfInterval } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
 
@@ -96,6 +96,9 @@ export default function BookingsPage() {
     }
 
     try {
+      if (booking.estado !== 'expirada') {
+        await adjustStockReservation(booking, -1);
+      }
       await updateDoc(doc(db, 'bookings', booking.id), {
         estado: 'cancelada',
         updated_at: serverTimestamp()
@@ -118,6 +121,9 @@ export default function BookingsPage() {
     }
 
     try {
+      if (booking.estado !== 'expirada') {
+        await adjustStockReservation(booking, -1);
+      }
       await deleteDoc(doc(db, 'bookings', id));
       alert('Reserva eliminada permanentemente');
     } catch (error) {
@@ -125,6 +131,14 @@ export default function BookingsPage() {
       alert('Error al eliminar la reserva');
     }
   };
+
+  // Auto-expire bookings that exceeded their hold window
+  useEffect(() => {
+    if (!bookings.length) return;
+    bookings.forEach((booking) => {
+      expireBookingIfNeeded(booking);
+    });
+  }, [bookings]);
 
   const copyContractLink = (booking: Booking) => {
     if (!booking.token_acceso) {
@@ -195,6 +209,54 @@ export default function BookingsPage() {
     return date;
   };
 
+  const adjustStockReservation = async (bookingToUpdate: Booking, delta: number) => {
+    if (!bookingToUpdate?.items?.length) return;
+    const start = getDate(bookingToUpdate.fecha_inicio);
+    const end = getDate(bookingToUpdate.fecha_fin);
+    const days = eachDayOfInterval({ start, end });
+    const batch = writeBatch(db);
+
+    days.forEach((day) => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      bookingToUpdate.items.forEach((item) => {
+        const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
+        batch.set(
+          stockRef,
+          {
+            fecha: dateStr,
+            producto_id: item.producto_id,
+            cantidad_reservada: increment(delta * item.cantidad),
+            actualizado_por: 'system',
+            timestamp: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      });
+    });
+
+    await batch.commit();
+  };
+
+  const expireBookingIfNeeded = async (booking: Booking) => {
+    if (!booking.expiracion) return;
+    if (booking.pago_realizado || booking.acuerdo_firmado) return;
+    if (booking.expirado || booking.estado === 'expirada') return;
+
+    const expirationDate = getDate(booking.expiracion);
+    if (new Date() <= expirationDate) return;
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        estado: 'expirada',
+        expirado: true,
+        updated_at: serverTimestamp(),
+      });
+      await adjustStockReservation(booking, -1);
+    } catch (error) {
+      console.error('Error expiring booking:', error);
+    }
+  };
+
   const filteredBookings = bookings.filter(booking => {
     const bookingStart = getDate(booking.fecha_inicio);
     const bookingEnd = getDate(booking.fecha_fin);
@@ -230,6 +292,7 @@ export default function BookingsPage() {
       case 'pendiente': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
       case 'completada': return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'cancelada': return 'bg-red-100 text-red-700 border-red-200';
+      case 'expirada': return 'bg-orange-100 text-orange-700 border-orange-200';
       default: return 'bg-gray-100 text-gray-700 border-gray-200';
     }
   };
@@ -240,6 +303,7 @@ export default function BookingsPage() {
       case 'pendiente': return <Clock size={16} />;
       case 'completada': return <FileCheck size={16} />;
       case 'cancelada': return <XCircle size={16} />;
+      case 'expirada': return <Clock size={16} />;
       default: return <Clock size={16} />;
     }
   };
@@ -393,7 +457,7 @@ export default function BookingsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          {['all', 'pendiente', 'confirmada', 'completada', 'cancelada'].map((status) => (
+          {['all', 'pendiente', 'confirmada', 'completada', 'cancelada', 'expirada'].map((status) => (
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
@@ -622,7 +686,7 @@ export default function BookingsPage() {
                         <CreditCard size={16} />
                         {booking.pago_realizado ? 'Pago' : 'Cobrar'}
                       </button>
-                      {booking.estado !== 'cancelada' && (
+                      {booking.estado !== 'cancelada' && booking.estado !== 'expirada' && (
                         <button 
                           onClick={() => handleCancelBooking(booking)}
                           className="btn-ghost text-sm text-orange-600"
@@ -879,7 +943,7 @@ export default function BookingsPage() {
                         >
                           <CreditCard size={18} />
                         </button>
-                        {booking.estado !== 'cancelada' && (
+                        {booking.estado !== 'cancelada' && booking.estado !== 'expirada' && (
                           <button 
                             onClick={() => handleCancelBooking(booking)}
                             className="btn-icon text-slate-400 hover:text-orange-600 hover:bg-orange-50" 

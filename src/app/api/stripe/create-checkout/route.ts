@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { bookingId, amount, currency = 'eur', customerEmail, customerName } = await request.json();
+    const { bookingId, amount, currency = 'eur', customerEmail, customerName, expiresAt } = await request.json();
 
     if (!bookingId || !amount) {
       return NextResponse.json(
@@ -50,6 +50,9 @@ export async function POST(request: NextRequest) {
         customer_name: customerName || '',
       },
       locale: 'auto', // Auto-detect locale (will show EUR properly)
+      ...(expiresAt && typeof expiresAt === 'number'
+        ? { expires_at: Math.max(expiresAt, Math.floor(Date.now() / 1000) + 60) }
+        : {}),
       success_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/booking/${bookingId}?payment=success`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/booking/${bookingId}?payment=cancelled`,
       // Enable automatic tax calculation if configured

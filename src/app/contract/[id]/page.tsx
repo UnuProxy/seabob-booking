@@ -7,9 +7,11 @@ import {
   documentId,
   getDoc,
   getDocs,
+  increment,
   query,
   serverTimestamp,
   updateDoc,
+  writeBatch,
   where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
@@ -27,7 +29,7 @@ import {
   PenTool,
   ShoppingBag,
 } from 'lucide-react';
-import { differenceInDays, format } from 'date-fns';
+import { differenceInDays, format, eachDayOfInterval } from 'date-fns';
 import { enUS, es } from 'date-fns/locale';
 
 const CONTRACT_COPY = {
@@ -472,6 +474,64 @@ export default function ContractPage() {
     return date;
   };
 
+  const adjustStockReservation = async (bookingToUpdate: Booking, delta: number) => {
+    if (!bookingToUpdate?.items?.length) return;
+    const start = new Date(bookingToUpdate.fecha_inicio);
+    const end = new Date(bookingToUpdate.fecha_fin);
+    const days = eachDayOfInterval({ start, end });
+    const batch = writeBatch(db);
+
+    days.forEach((day) => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      bookingToUpdate.items.forEach((item) => {
+        const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
+        batch.set(
+          stockRef,
+          {
+            fecha: dateStr,
+            producto_id: item.producto_id,
+            cantidad_reservada: increment(delta * item.cantidad),
+            actualizado_por: 'system_expiration',
+            timestamp: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      });
+    });
+
+    await batch.commit();
+  };
+
+  useEffect(() => {
+    const expireIfNeeded = async () => {
+      if (!booking) return;
+      if (booking.pago_realizado || booking.acuerdo_firmado) return;
+      if (booking.expirado || booking.estado === 'expirada') return;
+      if (!booking.expiracion) return;
+
+      const now = new Date();
+      const expirationDate = getDate(booking.expiracion);
+
+      if (now > expirationDate) {
+        try {
+          await updateDoc(doc(db, 'bookings', booking.id), {
+            estado: 'expirada',
+            expirado: true,
+            updated_at: serverTimestamp(),
+          });
+          await adjustStockReservation(booking, -1);
+          setBooking((prev) =>
+            prev ? { ...prev, estado: 'expirada', expirado: true } : prev
+          );
+        } catch (err) {
+          console.error('Error expiring booking:', err);
+        }
+      }
+    };
+
+    expireIfNeeded();
+  }, [booking]);
+
   const getProductName = (item: BookingItem) => {
     if (item.producto_nombre) return item.producto_nombre;
     if (productMap[item.producto_id]) return productMap[item.producto_id].nombre;
@@ -825,7 +885,20 @@ export default function ContractPage() {
               <CreditCard size={20} className="text-blue-600" />
               {copy.sections.payment}
             </h2>
-            {booking.pago_realizado ? (
+            {booking.estado === 'expirada' ? (
+              <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 text-center">
+                <div className="text-red-700 font-medium">
+                  {lang === 'es'
+                    ? '⏰ Esta reserva ha expirado por falta de pago'
+                    : '⏰ This reservation has expired due to non-payment'}
+                </div>
+                <div className="text-sm text-red-600 mt-1">
+                  {lang === 'es'
+                    ? 'El producto vuelve a estar disponible. Contacta con el agente para crear una nueva reserva.'
+                    : 'The product is available again. Please contact the agent to create a new booking.'}
+                </div>
+              </div>
+            ) : booking.pago_realizado ? (
               <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4 flex items-center gap-3">
                 <div className="bg-green-100 p-2 rounded-lg">
                   <CheckCircle size={24} className="text-green-600" />

@@ -9,6 +9,7 @@ import {
   getDoc,
   getDocs,
   increment,
+  writeBatch,
   query,
   serverTimestamp,
   updateDoc,
@@ -16,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { BookingItem, BookingLink, Product } from '@/types';
-import { addDays, differenceInDays, format } from 'date-fns';
+import { addDays, differenceInDays, format, eachDayOfInterval } from 'date-fns';
 import {
   Anchor,
   CalendarDays,
@@ -261,6 +262,36 @@ export default function PublicBookingPage() {
       const docRef = await addDoc(collection(db, 'bookings'), bookingData);
       const bookingId = docRef.id;
 
+      // Reserve stock immediately (hold during payment/signature window)
+      try {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const days = eachDayOfInterval({ start, end });
+        const batch = writeBatch(db);
+
+        days.forEach((day) => {
+          const dateStr = format(day, 'yyyy-MM-dd');
+          itemsWithNames.forEach((item) => {
+            const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
+            batch.set(
+              stockRef,
+              {
+                fecha: dateStr,
+                producto_id: item.producto_id,
+                cantidad_reservada: increment(item.cantidad),
+                actualizado_por: link.creado_por || 'public_link',
+                timestamp: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          });
+        });
+
+        await batch.commit();
+      } catch (stockError) {
+        console.error('Error reserving stock:', stockError);
+      }
+
       let paymentUrl: string | undefined;
 
       try {
@@ -277,6 +308,7 @@ export default function PublicBookingPage() {
             clientName: clientName.trim(),
             bookingRef: ref,
             token: contractToken,
+            expiresAt: Math.floor(expiracion.getTime() / 1000),
           }),
         });
 
