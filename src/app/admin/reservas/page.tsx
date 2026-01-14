@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, deleteDoc, doc, where, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, deleteDoc, doc, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
@@ -27,7 +27,8 @@ import {
   ShoppingBag,
   Calendar,
   Copy,
-  Euro
+  Euro,
+  Ban
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -89,9 +90,39 @@ export default function BookingsPage() {
     return () => unsubscribe();
   }, []);
 
-  const handleDelete = async (id: string) => {
-    if (confirm('¿Estás seguro de eliminar esta reserva permanentemente?')) {
+  const handleCancelBooking = async (booking: Booking) => {
+    if (!confirm(`¿Estás seguro de que deseas cancelar la reserva ${booking.numero_reserva}?\n\nEsto cambiará el estado a "cancelada" pero mantendrá el registro.`)) {
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        estado: 'cancelada',
+        updated_at: serverTimestamp()
+      });
+      alert('Reserva cancelada correctamente');
+    } catch (error) {
+      console.error('Error canceling booking:', error);
+      alert('Error al cancelar la reserva');
+    }
+  };
+
+  const handleDelete = async (id: string, booking: Booking) => {
+    if (!confirm(`⚠️ ¿Estás ABSOLUTAMENTE seguro de que deseas ELIMINAR permanentemente la reserva ${booking.numero_reserva}?\n\n✗ Esta acción NO se puede deshacer\n✗ Se perderá todo el historial\n✗ No se puede recuperar\n\n¿Continuar?`)) {
+      return;
+    }
+
+    // Double confirmation for safety
+    if (!confirm(`ÚLTIMA CONFIRMACIÓN:\n\nEliminar reserva ${booking.numero_reserva} de ${booking.cliente.nombre}\nTotal: €${booking.precio_total}\n\n¿Eliminar definitivamente?`)) {
+      return;
+    }
+
+    try {
       await deleteDoc(doc(db, 'bookings', id));
+      alert('Reserva eliminada permanentemente');
+    } catch (error) {
+      console.error('Error deleting booking:', error);
+      alert('Error al eliminar la reserva');
     }
   };
 
@@ -591,8 +622,17 @@ export default function BookingsPage() {
                         <CreditCard size={16} />
                         {booking.pago_realizado ? 'Pago' : 'Cobrar'}
                       </button>
+                      {booking.estado !== 'cancelada' && (
+                        <button 
+                          onClick={() => handleCancelBooking(booking)}
+                          className="btn-ghost text-sm text-orange-600"
+                        >
+                          <Ban size={16} />
+                          Cancelar
+                        </button>
+                      )}
                       <button 
-                        onClick={() => handleDelete(booking.id)}
+                        onClick={() => handleDelete(booking.id, booking)}
                         className="btn-ghost text-sm text-rose-600"
                       >
                         <Trash2 size={16} />
@@ -839,10 +879,19 @@ export default function BookingsPage() {
                         >
                           <CreditCard size={18} />
                         </button>
+                        {booking.estado !== 'cancelada' && (
+                          <button 
+                            onClick={() => handleCancelBooking(booking)}
+                            className="btn-icon text-slate-400 hover:text-orange-600 hover:bg-orange-50" 
+                            title="Cancelar reserva"
+                          >
+                            <Ban size={18} />
+                          </button>
+                        )}
                         <button 
-                          onClick={() => handleDelete(booking.id)}
+                          onClick={() => handleDelete(booking.id, booking)}
                           className="btn-icon text-slate-400 hover:text-rose-600 hover:bg-rose-50" 
-                          title="Eliminar"
+                          title="Eliminar reserva"
                         >
                           <Trash2 size={18} />
                         </button>

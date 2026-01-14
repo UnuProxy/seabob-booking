@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, where, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
@@ -19,7 +19,9 @@ import {
   Eye,
   Share2,
   Euro,
-  Loader2
+  Loader2,
+  Trash2,
+  Ban
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -146,6 +148,42 @@ export default function BrokerReservasPage() {
     const url = `${window.location.origin}/contract/${booking.id}?t=${booking.token_acceso}`;
     navigator.clipboard.writeText(url);
     alert('Enlace del contrato copiado al portapapeles');
+  };
+
+  const handleCancelBooking = async (booking: Booking) => {
+    if (!confirm(`¿Estás seguro de que deseas cancelar la reserva ${booking.numero_reserva}?\n\nEsto cambiará el estado a "cancelada" pero mantendrá el registro.`)) {
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        estado: 'cancelada',
+        updated_at: serverTimestamp()
+      });
+      alert('Reserva cancelada correctamente');
+    } catch (error) {
+      console.error('Error canceling booking:', error);
+      alert('Error al cancelar la reserva');
+    }
+  };
+
+  const handleDeleteBooking = async (booking: Booking) => {
+    if (!confirm(`⚠️ ¿Estás ABSOLUTAMENTE seguro de que deseas ELIMINAR permanentemente la reserva ${booking.numero_reserva}?\n\n✗ Esta acción NO se puede deshacer\n✗ Se perderá todo el historial\n✗ No se puede recuperar\n\n¿Continuar?`)) {
+      return;
+    }
+
+    // Double confirmation for safety
+    if (!confirm(`ÚLTIMA CONFIRMACIÓN:\n\nEliminar reserva ${booking.numero_reserva} de ${booking.cliente.nombre}\nTotal: €${booking.precio_total}\n\n¿Eliminar definitivamente?`)) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'bookings', booking.id));
+      alert('Reserva eliminada permanentemente');
+    } catch (error) {
+      console.error('Error deleting booking:', error);
+      alert('Error al eliminar la reserva');
+    }
   };
 
   const filteredBookings = bookings.filter(booking => {
@@ -369,6 +407,22 @@ export default function BrokerReservasPage() {
                         title="Ver detalles"
                       >
                         <Eye size={18} />
+                      </button>
+                      {booking.estado !== 'cancelada' && (
+                        <button
+                          onClick={() => handleCancelBooking(booking)}
+                          className="btn-icon text-slate-600 hover:bg-orange-50 hover:text-orange-600"
+                          title="Cancelar reserva"
+                        >
+                          <Ban size={18} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteBooking(booking)}
+                        className="btn-icon text-slate-600 hover:bg-red-50 hover:text-red-600"
+                        title="Eliminar reserva"
+                      >
+                        <Trash2 size={18} />
                       </button>
                     </div>
                   </td>
