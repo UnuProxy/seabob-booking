@@ -82,6 +82,8 @@ const CONTRACT_COPY = {
       unavailableTitle: 'Enlace de pago no disponible',
       unavailableNote: 'Contacta con el agente para realizar el pago.',
       direct: 'Pago directo',
+      requiredWarning: '⚠️ Debes completar el pago antes de poder firmar el contrato',
+      requiredNote: 'Una vez realizado el pago, podrás aceptar los términos y firmar digitalmente.',
     },
     success: {
       title: '¡Contrato Firmado!',
@@ -239,6 +241,8 @@ const CONTRACT_COPY = {
       unavailableTitle: 'Payment link not available',
       unavailableNote: 'Please contact the agent to complete payment.',
       direct: 'Direct payment',
+      requiredWarning: '⚠️ You must complete payment before you can sign the contract',
+      requiredNote: 'Once payment is complete, you will be able to accept terms and sign digitally.',
     },
     success: {
       title: 'Contract Signed!',
@@ -569,6 +573,14 @@ export default function ContractPage() {
 
   const handleSubmit = async () => {
     if (!booking || !signature || !termsAccepted) return;
+    
+    // Critical: Cannot confirm without payment
+    if (!booking.pago_realizado) {
+      alert(lang === 'es' 
+        ? '⚠️ Debes completar el pago antes de firmar el contrato.' 
+        : '⚠️ You must complete payment before signing the contract.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -866,6 +878,22 @@ export default function ContractPage() {
               <FileText size={20} className="text-blue-600" />
               {copy.sections.terms}
             </h2>
+            
+            {/* Payment Required Warning */}
+            {!booking.pago_realizado && (
+              <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-4 mb-4">
+                <div className="flex items-start gap-3">
+                  <div className="text-orange-600 mt-0.5">
+                    <CreditCard size={24} />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-orange-900 mb-1">{copy.payment.requiredWarning}</p>
+                    <p className="text-sm text-orange-700">{copy.payment.requiredNote}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-3 text-xs text-gray-600">
               {copy.terms.acceptance
                 .filter((p) => !p.includes('___')) // Remove any lines with blank underscores
@@ -906,9 +934,10 @@ export default function ContractPage() {
                 id="terms"
                 checked={termsAccepted}
                 onChange={(e) => setTermsAccepted(e.target.checked)}
-                className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300 cursor-pointer"
+                disabled={!booking.pago_realizado}
+                className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               />
-              <label htmlFor="terms" className="text-sm text-gray-700 font-medium select-none cursor-pointer">
+              <label htmlFor="terms" className={`text-sm text-gray-700 font-medium select-none ${booking.pago_realizado ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                 {copy.terms.acceptLabel}
               </label>
             </div>
@@ -919,28 +948,37 @@ export default function ContractPage() {
               <PenTool size={20} className="text-blue-600" />
               {copy.sections.signature}
             </h2>
-            <div className="border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 relative overflow-hidden touch-none">
+            <div className={`border-2 border-dashed rounded-xl relative overflow-hidden ${
+              booking.pago_realizado 
+                ? 'border-gray-300 bg-gray-50 touch-none' 
+                : 'border-gray-200 bg-gray-100 opacity-60 cursor-not-allowed'
+            }`}>
               <canvas
                 ref={canvasRef}
                 width={600}
                 height={200}
-                className="w-full h-48 cursor-crosshair touch-none"
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
-                onMouseLeave={stopDrawing}
-                onTouchStart={startDrawing}
-                onTouchMove={draw}
-                onTouchEnd={stopDrawing}
+                className={`w-full h-48 ${booking.pago_realizado ? 'cursor-crosshair touch-none' : 'pointer-events-none'}`}
+                onMouseDown={booking.pago_realizado ? startDrawing : undefined}
+                onMouseMove={booking.pago_realizado ? draw : undefined}
+                onMouseUp={booking.pago_realizado ? stopDrawing : undefined}
+                onMouseLeave={booking.pago_realizado ? stopDrawing : undefined}
+                onTouchStart={booking.pago_realizado ? startDrawing : undefined}
+                onTouchMove={booking.pago_realizado ? draw : undefined}
+                onTouchEnd={booking.pago_realizado ? stopDrawing : undefined}
               />
               {!signature && !isDrawing && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <p className="text-gray-400 text-sm">{copy.signature.hint}</p>
+                  <p className="text-gray-400 text-sm">
+                    {booking.pago_realizado 
+                      ? copy.signature.hint 
+                      : (lang === 'es' ? '🔒 Completa el pago primero' : '🔒 Complete payment first')}
+                  </p>
                 </div>
               )}
               <button
                 onClick={clearSignature}
-                className="absolute top-2 right-2 btn-outline text-rose-600 border-rose-200 px-2 py-1 text-xs hover:bg-rose-50"
+                disabled={!booking.pago_realizado}
+                className="absolute top-2 right-2 btn-outline text-rose-600 border-rose-200 px-2 py-1 text-xs hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {copy.actions.clear}
               </button>
@@ -949,9 +987,23 @@ export default function ContractPage() {
           </section>
 
           <div className="pt-6 border-t border-gray-100">
+            {!booking.pago_realizado && (
+              <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 mb-4 text-center">
+                <p className="font-bold text-red-900">
+                  {lang === 'es' 
+                    ? '🔒 El contrato no se puede confirmar sin completar el pago' 
+                    : '🔒 Contract cannot be confirmed without completing payment'}
+                </p>
+                <p className="text-sm text-red-700 mt-1">
+                  {lang === 'es'
+                    ? 'Por favor, realiza el pago en la sección "Pago" arriba para continuar.'
+                    : 'Please complete payment in the "Payment" section above to continue.'}
+                </p>
+              </div>
+            )}
             <button
               onClick={handleSubmit}
-              disabled={!termsAccepted || !signature || submitting}
+              disabled={!termsAccepted || !signature || submitting || !booking.pago_realizado}
               className="btn-primary w-full py-4 text-lg disabled:opacity-50"
             >
               {submitting ? <Loader2 className="animate-spin" size={24} /> : <CheckCircle size={24} />}
