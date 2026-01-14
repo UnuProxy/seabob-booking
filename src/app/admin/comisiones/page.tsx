@@ -291,24 +291,24 @@ export default function ComisionesPage() {
                         <h4 className="text-sm font-medium text-gray-700 mb-3">Reservas Pendientes de Pago</h4>
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="text-left text-gray-500">
-                              <th className="pb-2">Referencia</th>
-                              <th className="pb-2">Fecha</th>
-                              <th className="pb-2">Cliente</th>
-                              <th className="pb-2">Total Reserva</th>
-                              <th className="pb-2">Comisión</th>
-                              <th className="pb-2">Pendiente</th>
+                            <tr className="text-left">
+                              <th className="pb-2 text-gray-700 font-semibold">Referencia</th>
+                              <th className="pb-2 text-gray-700 font-semibold">Fecha</th>
+                              <th className="pb-2 text-gray-700 font-semibold">Cliente</th>
+                              <th className="pb-2 text-gray-700 font-semibold">Total Reserva</th>
+                              <th className="pb-2 text-gray-700 font-semibold">Comisión</th>
+                              <th className="pb-2 text-gray-700 font-semibold">Pendiente</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
                             {summary.reservas_pendientes.map(booking => (
                               <tr key={booking.id}>
-                                <td className="py-2 font-mono text-xs">{booking.numero_reserva}</td>
-                                <td className="py-2">{new Date(booking.fecha_inicio).toLocaleDateString('es-ES')}</td>
-                                <td className="py-2">{booking.cliente.nombre}</td>
-                                <td className="py-2">€{booking.precio_total.toFixed(2)}</td>
-                                <td className="py-2">€{(booking.comision_total || 0).toFixed(2)}</td>
-                                <td className="py-2 font-medium text-red-600">
+                                <td className="py-2 font-mono text-xs text-gray-900 font-medium">{booking.numero_reserva}</td>
+                                <td className="py-2 text-gray-900">{new Date(booking.fecha_inicio).toLocaleDateString('es-ES')}</td>
+                                <td className="py-2 text-gray-900 font-medium">{booking.cliente.nombre}</td>
+                                <td className="py-2 text-gray-900 font-medium">€{booking.precio_total.toFixed(2)}</td>
+                                <td className="py-2 text-gray-900 font-medium">€{(booking.comision_total || 0).toFixed(2)}</td>
+                                <td className="py-2 font-bold text-red-600">
                                   €{((booking.comision_total || 0) - (booking.comision_pagada || 0)).toFixed(2)}
                                 </td>
                               </tr>
