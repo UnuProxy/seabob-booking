@@ -205,6 +205,40 @@ export default function DailyStockPage() {
         </div>
       )}
 
+      {/* Info Banner */}
+      <div className="bg-blue-50 border-l-4 border-blue-500 p-5 mb-6 rounded-r-xl">
+        <div className="flex items-start gap-3">
+          <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5">
+            <AlertCircle size={18} className="text-blue-700" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-bold text-blue-900 mb-1.5">Cómo funciona el control de stock</h3>
+            <ul className="text-sm text-blue-800 space-y-1.5">
+              <li className="flex items-start gap-2">
+                <span className="font-bold mt-0.5">•</span>
+                <span><strong>Stock Total:</strong> Cantidad total de unidades disponibles para este día (establécelo aquí)</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="font-bold mt-0.5">•</span>
+                <span><strong>Reservados:</strong> Unidades ya reservadas por clientes (se actualiza automáticamente)</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="font-bold mt-0.5">•</span>
+                <span><strong>Disponibles Ahora:</strong> Stock Total - Reservados = Unidades que se pueden reservar ahora</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="font-bold mt-0.5">•</span>
+                <span><strong className="text-red-700">Sin Stock (rojo):</strong> No hay unidades disponibles - las reservas serán bloqueadas</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="font-bold mt-0.5">•</span>
+                <span><strong className="text-yellow-700">Stock Bajo (amarillo):</strong> Quedan 1-2 unidades - alerta de stock crítico</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       {loading ? (
         <div className="flex flex-col items-center justify-center py-12">
           <Loader2 className="animate-spin text-blue-600 mb-3" size={48} />
@@ -214,43 +248,87 @@ export default function DailyStockPage() {
         <div className="grid gap-4">
           {products.map(product => {
             const stock = stocks[product.id || ''] || { cantidad_disponible: 0, cantidad_reservada: 0 };
+            const availableNow = (stock.cantidad_disponible || 0) - (stock.cantidad_reservada || 0);
+            const isOutOfStock = availableNow <= 0 && stock.cantidad_disponible !== undefined;
+            const isLowStock = availableNow > 0 && availableNow <= 2;
+            const noStockSet = stock.cantidad_disponible === undefined || stock.cantidad_disponible === 0;
             
             return (
-              <div key={product.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between group hover:border-blue-200 transition-colors gap-6">
-                <div className="flex items-center gap-4">
-                  <div className="h-16 w-16 bg-gray-100 rounded-lg overflow-hidden shrink-0">
+              <div key={product.id} className={clsx(
+                "bg-white p-6 rounded-xl shadow-sm border-2 flex flex-col sm:flex-row sm:items-center justify-between group transition-all gap-6",
+                isOutOfStock && "border-red-300 bg-red-50/30",
+                isLowStock && "border-yellow-300 bg-yellow-50/30",
+                !isOutOfStock && !isLowStock && "border-gray-200 hover:border-blue-200"
+              )}>
+                <div className="flex items-center gap-4 flex-1">
+                  <div className="h-16 w-16 bg-gray-100 rounded-lg overflow-hidden shrink-0 relative">
                     {product.imagen_url ? (
                       <img src={product.imagen_url} alt={product.nombre} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">No img</div>
                     )}
+                    {isOutOfStock && (
+                      <div className="absolute inset-0 bg-red-600/80 flex items-center justify-center">
+                        <AlertCircle className="text-white" size={28} />
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <h3 className="font-bold text-lg text-gray-900">{product.nombre}</h3>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-lg text-gray-900">{product.nombre}</h3>
+                      {isOutOfStock && (
+                        <span className="px-2 py-1 bg-red-600 text-white text-xs font-bold uppercase rounded-md">
+                          Sin Stock
+                        </span>
+                      )}
+                      {isLowStock && (
+                        <span className="px-2 py-1 bg-yellow-600 text-white text-xs font-bold uppercase rounded-md">
+                          Stock Bajo
+                        </span>
+                      )}
+                    </div>
                     <p className="text-sm text-gray-500 uppercase tracking-wide font-medium">{product.tipo}</p>
+                    {noStockSet && (
+                      <p className="text-xs text-orange-600 font-semibold mt-1 flex items-center gap-1">
+                        <AlertCircle size={14} /> Establece el stock total para este día
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-6 justify-end">
-                  <div className="text-right">
-                    <p className="text-xs text-gray-500 mb-1 font-medium uppercase">Reservados</p>
-                    <span className="font-mono text-lg font-medium text-gray-700 bg-gray-50 px-4 py-2 rounded-lg border border-gray-100 block text-center min-w-[3rem]">
-                      {stock.cantidad_reservada}
+                <div className="flex items-center gap-6 justify-end flex-wrap sm:flex-nowrap">
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500 mb-1 font-medium uppercase">Disponibles Ahora</p>
+                    <span className={clsx(
+                      "font-mono text-2xl font-bold px-4 py-2 rounded-lg border-2 block min-w-[4rem]",
+                      isOutOfStock && "bg-red-100 border-red-300 text-red-700",
+                      isLowStock && "bg-yellow-100 border-yellow-300 text-yellow-700",
+                      !isOutOfStock && !isLowStock && "bg-green-100 border-green-300 text-green-700"
+                    )}>
+                      {availableNow}
                     </span>
                   </div>
 
-                  <div className="text-right">
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500 mb-1 font-medium uppercase">Reservados</p>
+                    <span className="font-mono text-lg font-medium text-gray-700 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 block text-center min-w-[3rem]">
+                      {stock.cantidad_reservada || 0}
+                    </span>
+                  </div>
+
+                  <div className="text-center">
                     <label htmlFor={`stock-${product.id}`} className="block text-xs text-blue-600 font-medium mb-1 uppercase">
-                      Disponible Total
+                      Stock Total
                     </label>
                     <div className="flex items-center gap-2">
                       <input
                         id={`stock-${product.id}`}
                         type="number"
                         min="0"
-                        value={stock.cantidad_disponible || ''}
+                        value={stock.cantidad_disponible ?? ''}
                         onChange={(e) => product.id && handleStockChange(product.id, e.target.value)}
-                        className="w-24 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-right font-mono text-lg"
+                        placeholder="0"
+                        className="w-24 px-3 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center font-mono text-lg font-bold"
                       />
                       <button
                         onClick={() => product.id && saveStock(product.id)}

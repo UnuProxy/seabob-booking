@@ -3,10 +3,10 @@
 import { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, query, where, serverTimestamp, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { Product, BookingItem, RentalType } from '@/types';
+import { Product, BookingItem, RentalType, DailyStock } from '@/types';
 import { useAuthStore } from '@/store/authStore';
-import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor } from 'lucide-react';
-import { format, differenceInDays } from 'date-fns';
+import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor, AlertCircle, PackageX } from 'lucide-react';
+import { format, differenceInDays, eachDayOfInterval } from 'date-fns';
 
 interface BookingFormProps {
   onClose: () => void;
@@ -17,6 +17,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
+  const [productStock, setProductStock] = useState<Record<string, { available: number; isOutOfStock: boolean; isLowStock: boolean }>>({});
   const [error, setError] = useState('');
 
   // Form State
@@ -62,6 +63,56 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     };
     fetchProducts();
   }, []);
+
+  // Check stock availability for selected dates
+  useEffect(() => {
+    const checkStock = async () => {
+      if (!startDate || !endDate || products.length === 0) return;
+
+      try {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const dates = eachDayOfInterval({ start, end });
+        
+        // For each product, check minimum available stock across all dates
+        const stockMap: Record<string, { available: number; isOutOfStock: boolean; isLowStock: boolean }> = {};
+        
+        for (const product of products) {
+          if (!product.id) continue;
+          
+          let minAvailable = Infinity;
+          
+          for (const date of dates) {
+            const dateStr = format(date, 'yyyy-MM-dd');
+            const stockDoc = await getDoc(doc(db, 'daily_stock', `${dateStr}_${product.id}`));
+            
+            if (stockDoc.exists()) {
+              const stockData = stockDoc.data() as DailyStock;
+              const available = (stockData.cantidad_disponible || 0) - (stockData.cantidad_reservada || 0);
+              minAvailable = Math.min(minAvailable, available);
+            } else {
+              // No stock configured = 0 available
+              minAvailable = 0;
+            }
+          }
+          
+          if (minAvailable === Infinity) minAvailable = 0;
+          
+          stockMap[product.id] = {
+            available: minAvailable,
+            isOutOfStock: minAvailable <= 0,
+            isLowStock: minAvailable > 0 && minAvailable <= 2,
+          };
+        }
+        
+        setProductStock(stockMap);
+      } catch (err) {
+        console.error('Error checking stock:', err);
+      }
+    };
+
+    checkStock();
+  }, [startDate, endDate, products]);
 
   const addItem = () => {
     if (products.length === 0 || !products[0].id) return;
@@ -115,6 +166,21 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     if (items.length === 0) {
       setError('Debes añadir al menos un producto');
       return;
+    }
+
+    // Validate stock availability
+    for (const item of items) {
+      const stockInfo = productStock[item.producto_id];
+      if (stockInfo?.isOutOfStock) {
+        const product = products.find(p => p.id === item.producto_id);
+        setError(`❌ ${product?.nombre || 'El producto seleccionado'} no tiene stock disponible para las fechas seleccionadas. Por favor, elige otro producto o cambia las fechas.`);
+        return;
+      }
+      if (stockInfo && item.cantidad > stockInfo.available) {
+        const product = products.find(p => p.id === item.producto_id);
+        setError(`❌ ${product?.nombre || 'El producto seleccionado'} solo tiene ${stockInfo.available} unidad(es) disponible(s), pero solicitaste ${item.cantidad}. Reduce la cantidad o cambia las fechas.`);
+        return;
+      }
     }
 
     setLoading(true);
@@ -465,41 +531,86 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             </div>
 
             <div className="space-y-4">
-              {items.map((item, index) => (
-                <div key={index} className="flex flex-col md:flex-row gap-4 items-start md:items-end bg-white/90 p-4 rounded-xl border border-blue-100 relative group text-gray-900 shadow-sm">
-                  <div className="flex-1 w-full">
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Producto</label>
-                    <select
-                      value={item.producto_id}
-                      onChange={(e) => updateItem(index, 'producto_id', e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 font-medium"
-                    >
-                      {products.map(p => (
-                        <option key={p.id} value={p.id}>{p.nombre} - €{p.precio_diario}/día</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <div className="w-full md:w-32">
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cantidad</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={item.cantidad}
-                      onChange={(e) => updateItem(index, 'cantidad', parseInt(e.target.value))}
-                      className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 font-medium"
-                    />
-                  </div>
+              {items.map((item, index) => {
+                const selectedProduct = products.find(p => p.id === item.producto_id);
+                const stockInfo = selectedProduct?.id ? productStock[selectedProduct.id] : null;
+                const showStockWarning = stockInfo && (stockInfo.isOutOfStock || stockInfo.isLowStock);
+                
+                return (
+                  <div key={index} className="flex flex-col gap-3 bg-white/90 p-4 rounded-xl border-2 border-blue-100 relative group text-gray-900 shadow-sm">
+                    {/* Stock Warning Banner */}
+                    {showStockWarning && (
+                      <div className={`flex items-center gap-2 p-3 rounded-lg ${stockInfo.isOutOfStock ? 'bg-red-50 border border-red-200' : 'bg-yellow-50 border border-yellow-200'}`}>
+                        {stockInfo.isOutOfStock ? (
+                          <>
+                            <PackageX className="text-red-600" size={20} />
+                            <div className="flex-1">
+                              <p className="text-sm font-bold text-red-700">⚠️ SIN STOCK DISPONIBLE</p>
+                              <p className="text-xs text-red-600">Este producto no tiene unidades disponibles para las fechas seleccionadas. Por favor, elige otro producto o cambia las fechas.</p>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <AlertCircle className="text-yellow-600" size={20} />
+                            <div className="flex-1">
+                              <p className="text-sm font-bold text-yellow-700">⚠️ STOCK BAJO</p>
+                              <p className="text-xs text-yellow-600">Quedan solo {stockInfo.available} unidad(es) disponible(s) para estas fechas.</p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
 
-                  <button
-                    type="button"
-                    onClick={() => removeItem(index)}
-                    className="btn-icon text-rose-400 hover:text-rose-600 hover:bg-rose-50 absolute top-2 right-2 md:static"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))}
+                    <div className="flex flex-col md:flex-row gap-4 items-start md:items-end">
+                      <div className="flex-1 w-full">
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
+                          Producto
+                          {stockInfo && (
+                            <span className={`ml-2 font-normal ${stockInfo.isOutOfStock ? 'text-red-600' : stockInfo.isLowStock ? 'text-yellow-600' : 'text-green-600'}`}>
+                              ({stockInfo.available} disponibles)
+                            </span>
+                          )}
+                        </label>
+                        <select
+                          value={item.producto_id}
+                          onChange={(e) => updateItem(index, 'producto_id', e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 font-medium"
+                        >
+                          {products.map(p => {
+                            const pStock = p.id ? productStock[p.id] : null;
+                            const outOfStock = pStock?.isOutOfStock;
+                            return (
+                              <option key={p.id} value={p.id} disabled={outOfStock}>
+                                {p.nombre} - €{p.precio_diario}/día {outOfStock ? '(SIN STOCK)' : pStock ? `(${pStock.available} disp.)` : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                      
+                      <div className="w-full md:w-32">
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cantidad</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max={stockInfo?.available || 999}
+                          value={item.cantidad}
+                          onChange={(e) => updateItem(index, 'cantidad', parseInt(e.target.value))}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 font-medium"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeItem(index)}
+                        className="btn-icon text-rose-400 hover:text-rose-600 hover:bg-rose-50 absolute top-2 right-2 md:static"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
 
               {items.length === 0 && (
                 <div className="text-center py-8 bg-white/80 border-2 border-dashed border-blue-200 rounded-xl text-gray-600">

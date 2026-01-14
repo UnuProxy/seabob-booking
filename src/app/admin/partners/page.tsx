@@ -388,9 +388,7 @@ function PartnerForm({ onClose, initialData }: { onClose: () => void; initialDat
                 El sistema le pedirá cambiarla en su primer inicio de sesión.
               </p>
             </div>
-          )}
-
-          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-blue-700">
+          )}          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-blue-700">
             <strong>ℹ️ Comisiones:</strong> Las comisiones se calculan automáticamente según el porcentaje configurado en cada producto.
           </div>
 
