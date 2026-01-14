@@ -30,10 +30,11 @@ export async function POST(request: NextRequest) {
     // Create Checkout Session
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      payment_method_types: ['card'], // Card payment (Apple Pay & Google Pay show automatically when available)
       line_items: [
         {
           price_data: {
-            currency: currency,
+            currency: 'eur', // Force EUR only (no GBP or other currencies)
             product_data: {
               name: `Reserva SeaBob #${bookingId}`,
               description: 'Alquiler de SeaBob',
@@ -48,6 +49,7 @@ export async function POST(request: NextRequest) {
         booking_id: bookingId,
         customer_name: customerName || '',
       },
+      locale: 'auto', // Auto-detect locale (will show EUR properly)
       success_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/booking/${bookingId}?payment=success`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/booking/${bookingId}?payment=cancelled`,
       // Enable automatic tax calculation if configured
