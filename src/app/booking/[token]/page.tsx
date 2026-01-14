@@ -211,6 +211,22 @@ export default function PublicBookingPage() {
         };
       });
 
+      // Calculate reservation expiration time (hold period)
+      const fechaInicio = new Date(startDate);
+      const ahora = new Date();
+      const diasHastaInicio = Math.floor((fechaInicio.getTime() - ahora.getTime()) / (1000 * 60 * 60 * 24));
+      
+      let tiempoExpiracion: number; // in milliseconds
+      if (diasHastaInicio >= 7) {
+        // 7+ days away: 24 hours to pay/sign
+        tiempoExpiracion = 24 * 60 * 60 * 1000; // 24 hours
+      } else {
+        // Less than 7 days: 1 hour to pay/sign
+        tiempoExpiracion = 1 * 60 * 60 * 1000; // 1 hour
+      }
+      
+      const expiracion = new Date(ahora.getTime() + tiempoExpiracion);
+
       const bookingData = {
         numero_reserva: ref,
         cliente: {
@@ -233,6 +249,8 @@ export default function PublicBookingPage() {
         firma_cliente: null,
         terminos_aceptados: false,
         pago_realizado: false,
+        expiracion: expiracion,
+        expirado: false,
         notas: notes.trim() || null,
         creado_en: serverTimestamp(),
         creado_por: link.creado_por || null,

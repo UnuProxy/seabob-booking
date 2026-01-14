@@ -2,7 +2,7 @@ export type UserRole = 'admin' | 'colaborador' | 'broker' | 'agency';
 export type EntityType = 'individual' | 'broker' | 'agency';
 export type ProductType = 'seabob' | 'jetski' | 'servicio';
 export type RentalType = 'hora' | 'dia';
-export type BookingStatus = 'pendiente' | 'confirmada' | 'completada' | 'cancelada';
+export type BookingStatus = 'pendiente' | 'confirmada' | 'completada' | 'cancelada' | 'expirada';
 
 export type PaymentMethod = 
   | 'stripe'          // Stripe payment
@@ -129,6 +129,10 @@ export interface Booking {
   creado_en: Date | string;
   confirmado_en?: Date | string;
   updated_at?: Date | string;
+  
+  // Reservation expiration (hold period)
+  expiracion?: Date | string; // When the reservation expires if not paid/signed
+  expirado?: boolean; // Whether the reservation has expired
 }
 
 // Commission payment record
