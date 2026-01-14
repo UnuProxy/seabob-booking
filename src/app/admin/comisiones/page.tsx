@@ -70,17 +70,43 @@ export default function ComisionesPage() {
         const summary = summariesMap.get(partnerId);
         if (!summary) return;
 
+        // CRITICAL: Only count commission if client has paid
+        if (!booking.pago_realizado) {
+          // Skip unpaid bookings - no commission owed until client pays
+          return;
+        }
+
         const comisionTotal = booking.comision_total || 0;
         const comisionPagada = booking.comision_pagada || 0;
-        const pendiente = comisionTotal - comisionPagada;
 
-        summary.total_comisiones += comisionTotal;
-        summary.total_pagado += comisionPagada;
-        summary.pendiente += pendiente;
-        summary.num_reservas += 1;
+        // Handle refund scenario
+        if (booking.reembolso_realizado) {
+          // Client was refunded, commission should be reversed
+          // If we already paid the broker (comision_pagada > 0), they owe us money back
+          const pendiente = -comisionPagada; // Negative = broker owes us
+          
+          summary.total_comisiones += 0; // Don't count refunded bookings in total
+          summary.total_pagado += comisionPagada; // We did pay this
+          summary.pendiente += pendiente; // Negative balance (owe us)
+          summary.num_reservas += 1;
 
-        if (pendiente > 0) {
-          summary.reservas_pendientes.push(booking);
+          if (pendiente < 0) {
+            // Broker owes us money - add to pending list with negative amount
+            summary.reservas_pendientes.push(booking);
+          }
+        } else {
+          // Normal paid booking (not refunded)
+          const pendiente = comisionTotal - comisionPagada;
+
+          summary.total_comisiones += comisionTotal;
+          summary.total_pagado += comisionPagada;
+          summary.pendiente += pendiente;
+          summary.num_reservas += 1;
+
+          if (pendiente > 0) {
+            // We owe broker money
+            summary.reservas_pendientes.push(booking);
+          }
         }
       });
 
@@ -258,9 +284,17 @@ export default function ComisionesPage() {
 
                     <div className="flex items-center gap-6">
                       <div className="text-right">
-                        <p className="text-sm text-gray-500">Pendiente</p>
-                        <p className={`font-bold ${summary.pendiente > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                          €{summary.pendiente.toFixed(2)}
+                        <p className="text-sm text-gray-500">
+                          {summary.pendiente < 0 ? 'Saldo a Favor' : summary.pendiente > 0 ? 'Pendiente' : 'Saldado'}
+                        </p>
+                        <p className={`font-bold ${
+                          summary.pendiente > 0 
+                            ? 'text-red-600' 
+                            : summary.pendiente < 0 
+                              ? 'text-blue-600' 
+                              : 'text-green-600'
+                        }`}>
+                          {summary.pendiente < 0 ? '+' : ''}€{Math.abs(summary.pendiente).toFixed(2)}
                         </p>
                       </div>
                       
@@ -276,6 +310,12 @@ export default function ComisionesPage() {
                         </button>
                       )}
                       
+                      {summary.pendiente < 0 && (
+                        <div className="px-3 py-1.5 bg-blue-100 border border-blue-300 rounded-lg text-xs font-semibold text-blue-700">
+                          Nos debe
+                        </div>
+                      )}
+                      
                       {expandedPartner === summary.partner_id ? (
                         <ChevronUp className="w-5 h-5 text-gray-400" />
                       ) : (
@@ -288,7 +328,9 @@ export default function ComisionesPage() {
                   {expandedPartner === summary.partner_id && summary.reservas_pendientes.length > 0 && (
                     <div className="px-6 pb-6">
                       <div className="bg-gray-50 rounded-lg p-4">
-                        <h4 className="text-sm font-medium text-gray-700 mb-3">Reservas Pendientes de Pago</h4>
+                        <h4 className="text-sm font-medium text-gray-700 mb-3">
+                          {summary.pendiente < 0 ? 'Reservas con Saldo a Favor' : 'Reservas Pendientes de Pago'}
+                        </h4>
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="text-left">
@@ -297,22 +339,42 @@ export default function ComisionesPage() {
                               <th className="pb-2 text-gray-700 font-semibold">Cliente</th>
                               <th className="pb-2 text-gray-700 font-semibold">Total Reserva</th>
                               <th className="pb-2 text-gray-700 font-semibold">Comisión</th>
-                              <th className="pb-2 text-gray-700 font-semibold">Pendiente</th>
+                              <th className="pb-2 text-gray-700 font-semibold">Saldo</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
-                            {summary.reservas_pendientes.map(booking => (
-                              <tr key={booking.id}>
-                                <td className="py-2 font-mono text-xs text-gray-900 font-medium">{booking.numero_reserva}</td>
-                                <td className="py-2 text-gray-900">{new Date(booking.fecha_inicio).toLocaleDateString('es-ES')}</td>
-                                <td className="py-2 text-gray-900 font-medium">{booking.cliente.nombre}</td>
-                                <td className="py-2 text-gray-900 font-medium">€{booking.precio_total.toFixed(2)}</td>
-                                <td className="py-2 text-gray-900 font-medium">€{(booking.comision_total || 0).toFixed(2)}</td>
-                                <td className="py-2 font-bold text-red-600">
-                                  €{((booking.comision_total || 0) - (booking.comision_pagada || 0)).toFixed(2)}
-                                </td>
-                              </tr>
-                            ))}
+                            {summary.reservas_pendientes.map(booking => {
+                              const isRefunded = booking.reembolso_realizado;
+                              const pendiente = isRefunded 
+                                ? -(booking.comision_pagada || 0) // Broker owes us
+                                : ((booking.comision_total || 0) - (booking.comision_pagada || 0)); // We owe broker
+                              
+                              return (
+                                <tr key={booking.id} className={isRefunded ? 'bg-blue-50' : ''}>
+                                  <td className="py-2 font-mono text-xs text-gray-900 font-medium">
+                                    {booking.numero_reserva}
+                                    {isRefunded && (
+                                      <span className="ml-2 text-xs bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded">
+                                        Reembolsado
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 text-gray-900">{new Date(booking.fecha_inicio).toLocaleDateString('es-ES')}</td>
+                                  <td className="py-2 text-gray-900 font-medium">{booking.cliente.nombre}</td>
+                                  <td className="py-2 text-gray-900 font-medium">
+                                    €{booking.precio_total.toFixed(2)}
+                                    {isRefunded && <span className="text-xs text-blue-600 ml-1">(devuelto)</span>}
+                                  </td>
+                                  <td className="py-2 text-gray-900 font-medium">
+                                    {isRefunded ? '€0.00' : `€${(booking.comision_total || 0).toFixed(2)}`}
+                                  </td>
+                                  <td className={`py-2 font-bold ${pendiente < 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                                    {pendiente < 0 ? '+' : ''}€{Math.abs(pendiente).toFixed(2)}
+                                    {pendiente < 0 && <span className="text-xs font-normal ml-1">(nos debe)</span>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
