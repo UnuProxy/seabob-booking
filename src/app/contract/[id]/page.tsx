@@ -867,9 +867,16 @@ export default function ContractPage() {
               {copy.sections.terms}
             </h2>
             <div className="space-y-3 text-xs text-gray-600">
-              {copy.terms.acceptance.map((paragraph) => (
-                <p key={paragraph}>{paragraph}</p>
-              ))}
+              {copy.terms.acceptance
+                .filter((p) => !p.includes('___')) // Remove any lines with blank underscores
+                .map((paragraph) => (
+                  <p key={paragraph}>{paragraph}</p>
+                ))}
+              <p>
+                {lang === 'es'
+                  ? `Firma por duplicado en Ibiza a ${format(new Date(), "d 'de' MMMM 'de' yyyy", { locale })}.`
+                  : `Signed in duplicate in Ibiza on ${format(new Date(), 'MMMM d, yyyy', { locale })}.`}
+              </p>
             </div>
             <details className="mt-4 bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs text-gray-600">
               <summary className="cursor-pointer font-semibold text-gray-700">
