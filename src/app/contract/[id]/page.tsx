@@ -370,6 +370,7 @@ export default function ContractPage() {
   const paymentStatus = searchParams.get('payment');
   const languageParam = searchParams.get('lang');
   const printMode = searchParams.get('print') === '1';
+  const adminView = searchParams.get('view') === 'admin';
 
   const [lang, setLang] = useState<Language>('es');
   const copy = CONTRACT_COPY[lang];
@@ -656,6 +657,12 @@ export default function ContractPage() {
 
   const handleSubmit = async () => {
     if (!booking || !signature || !termsAccepted) return;
+    if (booking.acuerdo_firmado) {
+      alert(lang === 'es'
+        ? 'Este contrato ya fue firmado y no puede volver a firmarse.'
+        : 'This contract has already been signed and cannot be signed again.');
+      return;
+    }
     
     // Critical: Cannot confirm without payment
     if (!booking.pago_realizado) {
@@ -711,7 +718,7 @@ export default function ContractPage() {
     window.open(url.toString(), '_blank', 'noopener,noreferrer');
   };
 
-  if (success && !printMode) {
+  if (success && !printMode && !adminView) {
     const successMessage = copy.success.body.replace('{name}', booking.cliente.nombre);
     const successDate = format(new Date(booking.fecha_inicio), getDateFormat(), { locale });
     const successLocation = getLocationLabel(booking.ubicacion_entrega);
@@ -1037,10 +1044,10 @@ export default function ContractPage() {
                 id="terms"
                 checked={termsAccepted}
                 onChange={(e) => setTermsAccepted(e.target.checked)}
-                disabled={!booking.pago_realizado}
+                disabled={!booking.pago_realizado || booking.acuerdo_firmado}
                 className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               />
-              <label htmlFor="terms" className={`text-sm text-gray-700 font-medium select-none ${booking.pago_realizado ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+              <label htmlFor="terms" className={`text-sm text-gray-700 font-medium select-none ${booking.pago_realizado && !booking.acuerdo_firmado ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                 {copy.terms.acceptLabel}
               </label>
             </div>
@@ -1052,7 +1059,7 @@ export default function ContractPage() {
               {copy.sections.signature}
             </h2>
             <div className={`border-2 border-dashed rounded-xl relative overflow-hidden ${
-              booking.pago_realizado 
+              booking.pago_realizado && !booking.acuerdo_firmado
                 ? 'border-gray-300 bg-gray-50 touch-none' 
                 : 'border-gray-200 bg-gray-100 opacity-60 cursor-not-allowed'
             }`}>
@@ -1060,27 +1067,29 @@ export default function ContractPage() {
                 ref={canvasRef}
                 width={600}
                 height={200}
-                className={`w-full h-48 ${booking.pago_realizado ? 'cursor-crosshair touch-none' : 'pointer-events-none'}`}
-                onMouseDown={booking.pago_realizado ? startDrawing : undefined}
-                onMouseMove={booking.pago_realizado ? draw : undefined}
-                onMouseUp={booking.pago_realizado ? stopDrawing : undefined}
-                onMouseLeave={booking.pago_realizado ? stopDrawing : undefined}
-                onTouchStart={booking.pago_realizado ? startDrawing : undefined}
-                onTouchMove={booking.pago_realizado ? draw : undefined}
-                onTouchEnd={booking.pago_realizado ? stopDrawing : undefined}
+                className={`w-full h-48 ${booking.pago_realizado && !booking.acuerdo_firmado ? 'cursor-crosshair touch-none' : 'pointer-events-none'}`}
+                onMouseDown={booking.pago_realizado && !booking.acuerdo_firmado ? startDrawing : undefined}
+                onMouseMove={booking.pago_realizado && !booking.acuerdo_firmado ? draw : undefined}
+                onMouseUp={booking.pago_realizado && !booking.acuerdo_firmado ? stopDrawing : undefined}
+                onMouseLeave={booking.pago_realizado && !booking.acuerdo_firmado ? stopDrawing : undefined}
+                onTouchStart={booking.pago_realizado && !booking.acuerdo_firmado ? startDrawing : undefined}
+                onTouchMove={booking.pago_realizado && !booking.acuerdo_firmado ? draw : undefined}
+                onTouchEnd={booking.pago_realizado && !booking.acuerdo_firmado ? stopDrawing : undefined}
               />
               {!signature && !isDrawing && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <p className="text-gray-400 text-sm">
-                    {booking.pago_realizado 
-                      ? copy.signature.hint 
+                    {booking.pago_realizado && !booking.acuerdo_firmado
+                      ? copy.signature.hint
+                      : booking.acuerdo_firmado
+                      ? (lang === 'es' ? '✅ Contrato ya firmado' : '✅ Contract already signed')
                       : (lang === 'es' ? '🔒 Completa el pago primero' : '🔒 Complete payment first')}
                   </p>
                 </div>
               )}
               <button
                 onClick={clearSignature}
-                disabled={!booking.pago_realizado}
+                disabled={!booking.pago_realizado || booking.acuerdo_firmado}
                 className="absolute top-2 right-2 btn-outline text-rose-600 border-rose-200 px-2 py-1 text-xs hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {copy.actions.clear}
@@ -1106,7 +1115,7 @@ export default function ContractPage() {
             )}
             <button
               onClick={handleSubmit}
-              disabled={!termsAccepted || !signature || submitting || !booking.pago_realizado}
+              disabled={!termsAccepted || !signature || submitting || !booking.pago_realizado || booking.acuerdo_firmado}
               className="btn-primary w-full py-4 text-lg disabled:opacity-50"
             >
               {submitting ? <Loader2 className="animate-spin" size={24} /> : <CheckCircle size={24} />}
