@@ -55,8 +55,9 @@ export default function PublicBookingPage() {
   const [clientPhone, setClientPhone] = useState('');
   const [notes, setNotes] = useState('');
 
-  const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [endDate, setEndDate] = useState(format(addDays(new Date(), 1), 'yyyy-MM-dd'));
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const [startDate, setStartDate] = useState(todayStr);
+  const [endDate, setEndDate] = useState(todayStr);
 
   const [deliveryLocation, setDeliveryLocation] = useState<
     'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro'
@@ -178,6 +179,53 @@ export default function PublicBookingPage() {
     });
   };
 
+  const validateStockAvailability = async () => {
+    if (!items.length) return { ok: true };
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const days = eachDayOfInterval({ start, end });
+
+    for (const item of items) {
+      let minAvailable = Infinity;
+
+      for (const day of days) {
+        const dateStr = format(day, 'yyyy-MM-dd');
+        const stockSnap = await getDoc(doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`));
+
+        if (stockSnap.exists()) {
+          const stockData = stockSnap.data() as { cantidad_disponible?: number; cantidad_reservada?: number };
+          const available =
+            (stockData.cantidad_disponible || 0) - (stockData.cantidad_reservada || 0);
+          minAvailable = Math.min(minAvailable, available);
+        } else {
+          minAvailable = 0;
+        }
+      }
+
+      if (minAvailable === Infinity) minAvailable = 0;
+
+      const product = products.find((p) => p.id === item.producto_id);
+      const productName = product?.nombre || 'El producto seleccionado';
+
+      if (minAvailable <= 0) {
+        return {
+          ok: false,
+          message: `❌ ${productName} no tiene stock disponible para las fechas seleccionadas. Por favor, elige otro producto o cambia las fechas.`,
+        };
+      }
+
+      if (item.cantidad > minAvailable) {
+        return {
+          ok: false,
+          message: `❌ ${productName} solo tiene ${minAvailable} unidad(es) disponible(s), pero solicitaste ${item.cantidad}. Reduce la cantidad o cambia las fechas.`,
+        };
+      }
+    }
+
+    return { ok: true };
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!link) return;
@@ -196,6 +244,13 @@ export default function PublicBookingPage() {
     setError('');
 
     try {
+      const stockValidation = await validateStockAvailability();
+      if (!stockValidation.ok) {
+        setError(stockValidation.message || 'No hay stock disponible para estas fechas.');
+        setSubmitting(false);
+        return;
+      }
+
       const ref = `RES-${format(new Date(), 'ddMMyy')}-${Math.floor(Math.random() * 1000)
         .toString()
         .padStart(3, '0')}`;
@@ -209,6 +264,8 @@ export default function PublicBookingPage() {
         return {
           ...item,
           producto_nombre: product?.nombre || item.producto_id,
+          precio_unitario: product?.precio_diario || 0,
+          comision_percent: product?.comision || 0,
         };
       });
 
@@ -380,7 +437,7 @@ export default function PublicBookingPage() {
 
   if (success.contractUrl) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-blue-50 flex items-center justify-center px-4 py-12">
+      <div className="min-h-screen bg-linear-to-b from-sky-50 via-white to-blue-50 flex items-center justify-center px-4 py-12">
         <div className="bg-white rounded-3xl shadow-xl border border-slate-100 p-8 max-w-lg w-full text-center">
           <div className="bg-emerald-100 text-emerald-700 inline-flex p-3 rounded-full mb-4">
             <CheckCircle size={32} />
@@ -425,7 +482,7 @@ export default function PublicBookingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-blue-50">
+    <div className="min-h-screen bg-linear-to-b from-sky-50 via-white to-blue-50">
       <div className="relative overflow-hidden">
         <div className="absolute -top-20 -right-24 h-72 w-72 bg-blue-200/40 rounded-full blur-3xl" />
         <div className="absolute -bottom-24 -left-16 h-72 w-72 bg-sky-200/50 rounded-full blur-3xl" />
@@ -477,7 +534,13 @@ export default function PublicBookingPage() {
                   <input
                     type="date"
                     value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
+                    min={todayStr}
+                    onChange={(e) => {
+                      const nextDate = e.target.value || todayStr;
+                      const safeDate = nextDate < todayStr ? todayStr : nextDate;
+                      setStartDate(safeDate);
+                      setEndDate(safeDate);
+                    }}
                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
                     required
                   />
@@ -489,8 +552,11 @@ export default function PublicBookingPage() {
                   <input
                     type="date"
                     value={endDate}
-                    min={startDate}
-                    onChange={(e) => setEndDate(e.target.value)}
+                    min={startDate < todayStr ? todayStr : startDate}
+                    onChange={(e) => {
+                      const nextDate = e.target.value || startDate;
+                      setEndDate(nextDate < startDate ? startDate : nextDate);
+                    }}
                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
                     required
                   />

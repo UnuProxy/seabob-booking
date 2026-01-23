@@ -15,7 +15,8 @@ import {
   Link2,
   Briefcase,
   X,
-  Coins
+  Coins,
+  LineChart
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
@@ -45,6 +46,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     { name: 'Usuarios', href: '/admin/usuarios', icon: Users, roles: ['admin'] },
     { name: 'Brokers/Agencias', href: '/admin/partners', icon: Briefcase, roles: ['admin'] },
     { name: 'Comisiones', href: '/admin/comisiones', icon: Coins, roles: ['admin'] },
+    { name: 'Finanzas', href: '/admin/finanzas', icon: LineChart, roles: ['admin'] },
     { name: 'Enlaces Reserva', href: '/admin/enlaces-reservas', icon: Link2, roles: ['admin', 'colaborador'] },
     { name: 'Contratos', href: '/admin/contratos', icon: FileText, roles: ['admin', 'colaborador'] },
     { name: 'Configuración', href: '/admin/settings', icon: Settings, roles: ['admin'] },
@@ -69,7 +71,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       {/* Sidebar Container */}
       <aside 
         className={clsx(
-          "fixed top-0 left-0 z-50 h-screen w-72 text-slate-100 transition-transform duration-300 lg:translate-x-0 shadow-xl flex flex-col bg-gradient-to-b from-slate-950 via-blue-950 to-blue-900 border-r border-white/10 overflow-hidden",
+          "fixed top-0 left-0 z-50 h-screen w-72 text-slate-100 transition-transform duration-300 lg:translate-x-0 shadow-xl flex flex-col bg-linear-to-b from-slate-950 via-blue-950 to-blue-900 border-r border-white/10 overflow-hidden",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >

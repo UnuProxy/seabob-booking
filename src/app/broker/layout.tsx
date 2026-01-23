@@ -3,6 +3,7 @@
 import { useAuthStore } from '@/store/authStore';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { Menu, X, CalendarDays, LogOut, Briefcase, Wallet } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
@@ -83,18 +84,24 @@ export default function BrokerLayout({
       {/* Sidebar */}
       <aside 
         className={clsx(
-          "fixed top-0 left-0 z-50 h-screen w-72 bg-slate-900 border-r border-slate-800 text-slate-100 transition-transform duration-300 lg:translate-x-0 shadow-xl flex flex-col",
+          "fixed top-0 left-0 z-50 h-screen w-72 text-slate-100 transition-transform duration-300 lg:translate-x-0 shadow-xl flex flex-col bg-linear-to-b from-slate-950 via-blue-950 to-blue-900 border-r border-white/10 overflow-hidden",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
+        <div className="absolute -top-20 left-10 h-40 w-40 rounded-full bg-cyan-400/15 blur-3xl pointer-events-none" aria-hidden="true" />
+        <div className="absolute bottom-10 -right-10 h-48 w-48 rounded-full bg-indigo-500/15 blur-3xl pointer-events-none" aria-hidden="true" />
+
         {/* Header with Logo */}
-        <div className="p-6 border-b border-slate-800 flex items-center justify-between bg-slate-900">
-          <div className="relative w-full h-16 bg-white rounded-lg p-2">
-             <img 
-               src="/seabob-logo-CENTER_IBIZA-ROJO.png" 
-               alt="SeaBob Center Ibiza" 
-               className="w-full h-full object-contain object-left"
-             />
+        <div className="p-6 border-b border-white/10 flex items-center justify-between relative">
+          <div className="relative w-full h-16 bg-white/90 rounded-2xl p-2 shadow-lg shadow-black/30 border border-white/50">
+            <Image
+              src="/seabob-logo-CENTER_IBIZA-ROJO.png"
+              alt="SeaBob Center Ibiza"
+              fill
+              sizes="240px"
+              className="object-contain object-left"
+              priority
+            />
           </div>
           <button 
             onClick={() => setSidebarOpen(false)}
@@ -105,7 +112,7 @@ export default function BrokerLayout({
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
           {navItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
@@ -118,15 +125,15 @@ export default function BrokerLayout({
                 className={clsx(
                   "flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-base",
                   isActive 
-                    ? "bg-blue-600 text-white shadow-lg shadow-blue-900/50 translate-x-1" 
-                    : "text-slate-400 hover:bg-slate-800 hover:text-white hover:translate-x-1"
+                    ? "bg-white/18 text-white shadow-[0_12px_30px_rgba(15,23,42,0.35)] translate-x-1" 
+                    : "text-blue-100/70 hover:bg-white/10 hover:text-white hover:translate-x-1"
                 )}
               >
                 <item.icon 
                   size={24} 
                   className={clsx(
                     "transition-colors",
-                    isActive ? "text-white" : "text-slate-500 group-hover:text-blue-400"
+                    isActive ? "text-white" : "text-blue-200/60 group-hover:text-white"
                   )} 
                 />
                 <span className="flex-1">{item.name}</span>
@@ -135,7 +142,7 @@ export default function BrokerLayout({
                     "px-2 py-0.5 text-xs font-bold rounded-full",
                     isActive 
                       ? "bg-white/20 text-white" 
-                      : "bg-green-500 text-white"
+                      : "bg-emerald-400 text-emerald-950"
                   )}>
                     {item.badge}
                   </span>
@@ -146,14 +153,14 @@ export default function BrokerLayout({
         </nav>
 
         {/* Footer User Profile */}
-        <div className="p-4 border-t border-slate-800 bg-slate-900">
+        <div className="p-4 border-t border-white/10">
           <div className="flex items-center gap-3 px-2 mb-4">
-            <div className="h-10 w-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-lg shadow-md ring-2 ring-slate-700">
+            <div className="h-10 w-10 rounded-full bg-white/15 flex items-center justify-center text-white font-bold text-lg shadow-md ring-1 ring-white/30">
               {user?.nombre?.charAt(0) || 'U'}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold truncate text-white">{user?.nombre || 'Usuario'}</p>
-              <p className="text-xs text-slate-400 capitalize truncate">
+              <p className="text-xs text-blue-100/60 capitalize truncate">
                 {user?.rol === 'broker' ? 'Broker' : 'Agencia'}
               </p>
             </div>
