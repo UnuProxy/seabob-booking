@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, query, where, serverTimestamp, doc, updateDoc, getDoc, writeBatch, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { Product, BookingItem, RentalType, DailyStock, User } from '@/types';
+import { Product, BookingItem, RentalType, DailyStock, User as AppUser } from '@/types';
 import { useAuthStore } from '@/store/authStore';
 import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor, AlertCircle, PackageX } from 'lucide-react';
 import { format, differenceInDays, eachDayOfInterval } from 'date-fns';
@@ -17,7 +17,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
-  const [partners, setPartners] = useState<User[]>([]);
+  const [partners, setPartners] = useState<AppUser[]>([]);
   const [productStock, setProductStock] = useState<Record<string, { available: number; isOutOfStock: boolean; isLowStock: boolean }>>({});
   const [error, setError] = useState('');
 
@@ -78,7 +78,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
           where('rol', 'in', ['broker', 'agency', 'colaborador'])
         );
         const snapshot = await getDocs(q);
-        const usersData = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as User));
+        const usersData = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as AppUser));
         usersData.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
         setPartners(usersData);
       } catch (err) {
