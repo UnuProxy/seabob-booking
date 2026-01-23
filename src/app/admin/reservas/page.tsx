@@ -47,6 +47,7 @@ export default function BookingsPage() {
   const [timeFilter, setTimeFilter] = useState<'today' | 'upcoming' | 'all'>('today');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [expandedBookings, setExpandedBookings] = useState<Record<string, boolean>>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
   const [paymentManaging, setPaymentManaging] = useState<Booking | null>(null);
@@ -557,15 +558,22 @@ export default function BookingsPage() {
         {filteredBookings.length > 0 ? (
           <>
             {/* Mobile Cards */}
-            <div className="md:hidden divide-y divide-gray-100">
+            <div className="md:hidden space-y-4">
               {filteredBookings.map((booking) => {
                 const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
                 const todayEnd = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999);
                 const bookingStart = getDate(booking.fecha_inicio);
                 const bookingEnd = getDate(booking.fecha_fin);
                 const isToday = bookingEnd >= todayStart && bookingStart <= todayEnd;
+                const isExpanded = Boolean(expandedBookings[booking.id]);
                 return (
-                  <div key={booking.id} className={clsx("p-4 space-y-3", isToday && "bg-blue-50/40")}>
+                  <div
+                    key={booking.id}
+                    className={clsx(
+                      "p-4 space-y-3 rounded-2xl border border-gray-200 bg-white shadow-sm",
+                      isToday && "border-blue-200 bg-blue-50/30"
+                    )}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="text-xs uppercase text-gray-500 font-semibold">Referencia</div>
@@ -587,22 +595,6 @@ export default function BookingsPage() {
                             Hoy
                           </span>
                         )}
-                        {booking.reembolso_realizado ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold px-2 py-0.5">
-                            <XCircle size={12} />
-                            Reembolsado
-                          </span>
-                        ) : booking.pago_realizado ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5">
-                            <CheckCircle2 size={12} />
-                            Pagado
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5">
-                            <Clock size={12} />
-                            Pend. Pago
-                          </span>
-                        )}
                       </div>
                     </div>
 
@@ -613,26 +605,60 @@ export default function BookingsPage() {
                         <div className="text-xs text-gray-500">{booking.cliente.email}</div>
                       </div>
                       <div>
-                        <div className="text-xs uppercase text-gray-500 font-semibold">Agente</div>
-                        <div className="text-gray-900 font-medium">{getAgentName(booking)}</div>
-                        <div className="text-xs text-gray-500">{getAgentType(booking)}</div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <div className="text-xs uppercase text-gray-500 font-semibold">Fechas</div>
-                        <div className="text-gray-900">
+                        <div className="text-xs uppercase text-gray-500 font-semibold">Total</div>
+                        <div className="text-gray-900 font-semibold">
+                          €{booking.precio_total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">
                           {format(parseISO(booking.fecha_inicio), 'dd MMM', { locale: es })} - {format(parseISO(booking.fecha_fin), 'dd MMM', { locale: es })}
                         </div>
                       </div>
-                      <div>
-                        <div className="text-xs uppercase text-gray-500 font-semibold">Total</div>
-                        <div className="text-gray-900 font-semibold">€{booking.precio_total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
-                      </div>
                     </div>
 
-                    <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm">
+                    {!isExpanded && (
+                      <button
+                        onClick={() =>
+                          setExpandedBookings((prev) => ({
+                            ...prev,
+                            [booking.id]: !prev[booking.id],
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        Ver detalles
+                      </button>
+                    )}
+
+                    {isExpanded && (
+                      <>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <div className="text-xs uppercase text-gray-500 font-semibold">Agente</div>
+                            <div className="text-gray-900 font-medium">{getAgentName(booking)}</div>
+                            <div className="text-xs text-gray-500">{getAgentType(booking)}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase text-gray-500 font-semibold">Pago</div>
+                            {booking.reembolso_realizado ? (
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold px-2 py-0.5">
+                                <XCircle size={12} />
+                                Reembolsado
+                              </span>
+                            ) : booking.pago_realizado ? (
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5">
+                                <CheckCircle2 size={12} />
+                                Pagado
+                              </span>
+                            ) : (
+                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5">
+                                <Clock size={12} />
+                                Pend. Pago
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm">
                       <div className="flex items-center justify-between">
                         <div className="text-xs uppercase text-gray-500 font-semibold">Entrega</div>
                         <button
@@ -653,9 +679,9 @@ export default function BookingsPage() {
                       <div className="text-xs text-gray-500">
                         {booking.numero_amarre ? `Amarre: ${booking.numero_amarre}` : 'Amarre: no indicado'}
                       </div>
-                    </div>
+                        </div>
 
-                    <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm">
+                        <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm">
                       <div className="flex items-center justify-between">
                         <div className="text-xs uppercase text-gray-500 font-semibold">Productos</div>
                         <button
@@ -676,9 +702,9 @@ export default function BookingsPage() {
                           </div>
                         ))}
                       </div>
-                    </div>
+                        </div>
 
-                    <div className="grid grid-cols-2 gap-3 text-xs text-gray-500">
+                        <div className="grid grid-cols-2 gap-3 text-xs text-gray-500">
                       <div className="flex items-center gap-2">
                         {booking.acuerdo_firmado ? (
                           <>
@@ -705,9 +731,9 @@ export default function BookingsPage() {
                           </>
                         )}
                       </div>
-                    </div>
+                        </div>
 
-                    <div className="flex items-center gap-2 pt-2">
+                        <div className="flex items-center gap-2 pt-2">
                       <button 
                         onClick={() => copyContractLink(booking)}
                         className="btn-ghost text-sm text-emerald-700"
@@ -756,7 +782,20 @@ export default function BookingsPage() {
                         <Trash2 size={16} />
                         Eliminar
                       </button>
-                    </div>
+                        </div>
+                        <button
+                          onClick={() =>
+                            setExpandedBookings((prev) => ({
+                              ...prev,
+                              [booking.id]: !prev[booking.id],
+                            }))
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          Ocultar detalles
+                        </button>
+                      </>
+                    )}
                   </div>
                 );
               })}
@@ -788,7 +827,13 @@ export default function BookingsPage() {
                   const bookingEnd = getDate(booking.fecha_fin);
                   const isToday = bookingEnd >= todayStart && bookingStart <= todayEnd;
                   return (
-                  <tr key={booking.id} className={clsx("hover:bg-gray-50/50 transition-colors group", isToday && "bg-blue-50/30")}>
+                  <tr
+                    key={booking.id}
+                    className={clsx(
+                      "hover:bg-gray-50/50 transition-colors group border-l-4 border-transparent",
+                      isToday && "bg-blue-50/30 border-blue-400"
+                    )}
+                  >
                     <td className="px-6 py-4">
                       <span className="font-mono text-sm font-medium text-gray-900">{booking.numero_reserva}</span>
                       <div className="text-xs text-gray-500 mt-1">
