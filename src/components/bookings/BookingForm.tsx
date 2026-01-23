@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { collection, addDoc, getDocs, query, where, serverTimestamp, doc, updateDoc, getDoc, writeBatch, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { Product, BookingItem, RentalType, DailyStock } from '@/types';
+import { Product, BookingItem, RentalType, DailyStock, User } from '@/types';
 import { useAuthStore } from '@/store/authStore';
 import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor, AlertCircle, PackageX } from 'lucide-react';
 import { format, differenceInDays, eachDayOfInterval } from 'date-fns';
@@ -17,6 +17,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const { user } = useAuthStore();
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
+  const [partners, setPartners] = useState<User[]>([]);
   const [productStock, setProductStock] = useState<Record<string, { available: number; isOutOfStock: boolean; isLowStock: boolean }>>({});
   const [error, setError] = useState('');
 
@@ -37,6 +38,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const [deliveryTime, setDeliveryTime] = useState('09:00'); // Default 9 AM
   
   const [notes, setNotes] = useState('');
+  const [skipPayment, setSkipPayment] = useState(false);
+  const [partnerType, setPartnerType] = useState<'directo' | 'broker' | 'agency' | 'colaborador'>('directo');
+  const [partnerId, setPartnerId] = useState('');
 
   // Fetch products
   useEffect(() => {
@@ -63,6 +67,27 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     };
     fetchProducts();
   }, []);
+
+  useEffect(() => {
+    if (!user || user.rol !== 'admin') return;
+
+    const fetchPartners = async () => {
+      try {
+        const q = query(
+          collection(db, 'users'),
+          where('rol', 'in', ['broker', 'agency', 'colaborador'])
+        );
+        const snapshot = await getDocs(q);
+        const usersData = snapshot.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() } as User));
+        usersData.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+        setPartners(usersData);
+      } catch (err) {
+        console.error('Error fetching partners:', err);
+      }
+    };
+
+    fetchPartners();
+  }, [user]);
 
   // Check stock availability for selected dates
   useEffect(() => {
@@ -212,7 +237,12 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       
       // Calculate total commission for broker/agency bookings
       let comisionTotal = 0;
-      if (user.rol === 'broker' || user.rol === 'agency') {
+      const commissionPartner =
+        user.rol === 'broker' ||
+        user.rol === 'agency' ||
+        (user.rol === 'admin' && (partnerType === 'broker' || partnerType === 'agency'));
+
+      if (commissionPartner) {
         const days = Math.max(1, differenceInDays(new Date(endDate), new Date(startDate)));
         comisionTotal = itemsWithNames.reduce((total, item) => {
           const itemPrice = (item.precio_unitario || 0) * item.cantidad * days;
@@ -226,16 +256,18 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       const ahora = new Date();
       const diasHastaInicio = differenceInDays(fechaInicio, ahora);
       
-      let tiempoExpiracion: number; // in milliseconds
-      if (diasHastaInicio >= 7) {
-        // 7+ days away: 24 hours to pay/sign
-        tiempoExpiracion = 24 * 60 * 60 * 1000; // 24 hours
-      } else {
-        // Less than 7 days: 1 hour to pay/sign
-        tiempoExpiracion = 1 * 60 * 60 * 1000; // 1 hour
+      let expiracion: Date | null = null;
+      if (!(user.rol === 'admin' && skipPayment)) {
+        let tiempoExpiracion: number; // in milliseconds
+        if (diasHastaInicio >= 7) {
+          // 7+ days away: 24 hours to pay/sign
+          tiempoExpiracion = 24 * 60 * 60 * 1000; // 24 hours
+        } else {
+          // Less than 7 days: 1 hour to pay/sign
+          tiempoExpiracion = 1 * 60 * 60 * 1000; // 1 hour
+        }
+        expiracion = new Date(ahora.getTime() + tiempoExpiracion);
       }
-      
-      const expiracion = new Date(ahora.getTime() + tiempoExpiracion);
       
       const bookingData = {
         numero_reserva: ref,
@@ -249,7 +281,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         fecha_inicio: startDate,
         fecha_fin: endDate,
         precio_total: totalAmount,
-        estado: 'pendiente',
+        estado: user.rol === 'admin' && skipPayment ? 'confirmada' : 'pendiente',
         acuerdo_firmado: false,
         
         // Commission tracking (for broker/agency bookings)
@@ -275,9 +307,14 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         notas: notes,
         creado_en: serverTimestamp(),
         creado_por: user.id,
+        origen: 'panel',
+        ...(partnerType === 'directo' ? { cliente_directo: true } : {}),
         ...(user.rol === 'broker' ? { broker_id: user.id } : {}),
         ...(user.rol === 'agency' ? { agency_id: user.id } : {}),
-        ...(user.rol === 'colaborador' ? { colaborador_id: user.id } : {})
+        ...(user.rol === 'colaborador' ? { colaborador_id: user.id } : {}),
+        ...(user.rol === 'admin' && partnerType === 'broker' && partnerId ? { broker_id: partnerId } : {}),
+        ...(user.rol === 'admin' && partnerType === 'agency' && partnerId ? { agency_id: partnerId } : {}),
+        ...(user.rol === 'admin' && partnerType === 'colaborador' && partnerId ? { colaborador_id: partnerId } : {})
       };
 
       // 1. Create booking
@@ -315,42 +352,44 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         // If stock reservation fails, we still keep the booking, but warn in console
       }
 
-      // 3. Generate Stripe payment link
-      try {
-        const response = await fetch('/api/stripe/create-checkout', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            bookingId,
-            amount: totalAmount,
-            currency: 'eur',
-            clientEmail,
-            clientName,
-            bookingRef: ref,
-            token,
-            expiresAt: Math.floor(expiracion.getTime() / 1000),
-          }),
-        });
+      if (!(user.rol === 'admin' && skipPayment)) {
+        // 3. Generate Stripe payment link
+        try {
+          const response = await fetch('/api/stripe/create-checkout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              bookingId,
+              amount: totalAmount,
+              currency: 'eur',
+              clientEmail,
+              clientName,
+              bookingRef: ref,
+              token,
+              expiresAt: expiracion ? Math.floor(expiracion.getTime() / 1000) : undefined,
+            }),
+          });
 
-        if (response.ok) {
-          const { url, sessionId } = await response.json();
-          
-          // Update booking with payment link (only if we got valid values)
-          if (url && sessionId) {
-            await updateDoc(doc(db, 'bookings', bookingId), {
-              stripe_checkout_session_id: sessionId,
-              stripe_payment_link: url,
-            });
+          if (response.ok) {
+            const { url, sessionId } = await response.json();
+            
+            // Update booking with payment link (only if we got valid values)
+            if (url && sessionId) {
+              await updateDoc(doc(db, 'bookings', bookingId), {
+                stripe_checkout_session_id: sessionId,
+                stripe_payment_link: url,
+              });
+            }
+          } else {
+            console.error('Failed to create payment link');
+            // Continue anyway - booking is created, payment link can be generated later
           }
-        } else {
-          console.error('Failed to create payment link');
-          // Continue anyway - booking is created, payment link can be generated later
+        } catch (paymentError) {
+          console.error('Error creating payment link:', paymentError);
+          // Continue anyway - booking is created
         }
-      } catch (paymentError) {
-        console.error('Error creating payment link:', paymentError);
-        // Continue anyway - booking is created
       }
       
       onSuccess();
@@ -441,12 +480,92 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                 <p className="text-xs text-gray-500 mt-2">Úsalo para coordinar la entrega y resolver dudas.</p>
               </div>
               <div className="md:col-span-2">
-                <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                  Las reservas quedan en estado pendiente hasta recibir el pago completo.
-                </div>
+                {user?.rol === 'admin' ? (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                    {skipPayment
+                      ? 'Reserva confirmada sin pago. Podrás registrar el pago manualmente más adelante.'
+                      : 'Las reservas quedan en estado pendiente hasta recibir el pago completo.'}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                    Las reservas quedan en estado pendiente hasta recibir el pago completo.
+                  </div>
+                )}
               </div>
             </div>
           </section>
+
+          {user?.rol === 'admin' && (
+            <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+              <div className="flex items-start gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
+                  <CreditCard className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
+                    Opciones de Pago y Asignacion
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Confirma sin pago y asigna la reserva a un broker o agencia.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="flex items-center gap-3">
+                  <input
+                    id="skipPayment"
+                    type="checkbox"
+                    checked={skipPayment}
+                    onChange={(event) => setSkipPayment(event.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-900/30"
+                  />
+                  <label htmlFor="skipPayment" className="text-sm font-semibold text-gray-700">
+                    Crear reserva sin pago (no generar enlace Stripe)
+                  </label>
+                </div>
+
+                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Asignar a</label>
+                    <select
+                      value={partnerType}
+                      onChange={(event) => {
+                        const nextType = event.target.value as typeof partnerType;
+                        setPartnerType(nextType);
+                        setPartnerId('');
+                      }}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                    >
+                      <option value="directo">Cliente directo</option>
+                      <option value="broker">Broker</option>
+                      <option value="agency">Agencia</option>
+                      <option value="colaborador">Colaborador</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Entidad</label>
+                    <select
+                      value={partnerId}
+                      onChange={(event) => setPartnerId(event.target.value)}
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                      disabled={partnerType === 'directo'}
+                    >
+                      <option value="">Sin asignar</option>
+                      {partners
+                        .filter((partner) => partner.rol === partnerType)
+                        .map((partner) => (
+                          <option key={partner.id} value={partner.id}>
+                            {partner.nombre}
+                            {partner.empresa_nombre ? ` · ${partner.empresa_nombre}` : ''}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* Section 2: Dates & Details */}
           <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">

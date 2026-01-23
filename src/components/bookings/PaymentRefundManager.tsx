@@ -380,23 +380,23 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
 
           {/* Already Refunded Info */}
           {isRefunded && (
-            <div className="border border-red-200 bg-red-50 rounded-xl p-5">
+            <div className="border border-red-200 bg-red-50 rounded-xl p-5 text-red-800">
               <div className="flex items-center gap-2 mb-3">
                 <RefreshCcw className="text-red-600" size={24} />
                 <h3 className="text-lg font-bold text-red-900">Reembolso Procesado</h3>
               </div>
               <div className="space-y-2 text-sm">
                 {booking.reembolso_monto && (
-                  <p><span className="font-semibold">Monto:</span> €{booking.reembolso_monto.toFixed(2)}</p>
+                  <p><span className="font-semibold text-red-900">Monto:</span> €{booking.reembolso_monto.toFixed(2)}</p>
                 )}
                 {booking.reembolso_metodo && (
-                  <p><span className="font-semibold">Método:</span> {booking.reembolso_metodo}</p>
+                  <p><span className="font-semibold text-red-900">Método:</span> {booking.reembolso_metodo}</p>
                 )}
                 {booking.reembolso_motivo && (
-                  <p><span className="font-semibold">Motivo:</span> {booking.reembolso_motivo}</p>
+                  <p><span className="font-semibold text-red-900">Motivo:</span> {booking.reembolso_motivo}</p>
                 )}
                 {booking.reembolso_referencia && (
-                  <p><span className="font-semibold">Referencia:</span> {booking.reembolso_referencia}</p>
+                  <p><span className="font-semibold text-red-900">Referencia:</span> {booking.reembolso_referencia}</p>
                 )}
               </div>
             </div>

@@ -91,8 +91,8 @@ const CONTRACT_COPY = {
       title: '¡Contrato Firmado!',
       body: 'Gracias, {name}. Tu reserva ha sido confirmada correctamente.',
       nextSteps: 'Siguientes Pasos',
-      step1: 'Recibirás un email con los detalles.',
-      step2: 'El pago se realizará según lo acordado.',
+      step1: 'Tu reserva queda confirmada y lista para el día acordado.',
+      step2: 'Guarda esta copia del contrato para tus registros.',
       step3: 'Nos vemos en {location} el {date}.',
       download: 'Descargar Copia',
     },
@@ -250,8 +250,8 @@ const CONTRACT_COPY = {
       title: 'Contract Signed!',
       body: 'Thank you, {name}. Your booking has been successfully confirmed.',
       nextSteps: 'Next Steps',
-      step1: 'You will receive an email with the details.',
-      step2: 'Payment will be made as agreed.',
+      step1: 'Your reservation is confirmed for the agreed date.',
+      step2: 'Save a copy of this contract for your records.',
       step3: 'See you at {location} on {date}.',
       download: 'Download Copy',
     },
@@ -369,6 +369,7 @@ export default function ContractPage() {
   const token = searchParams.get('t');
   const paymentStatus = searchParams.get('payment');
   const languageParam = searchParams.get('lang');
+  const printMode = searchParams.get('print') === '1';
 
   const [lang, setLang] = useState<Language>('es');
   const copy = CONTRACT_COPY[lang];
@@ -394,6 +395,14 @@ export default function ContractPage() {
       setLang(languageParam);
     }
   }, [languageParam]);
+
+  useEffect(() => {
+    if (!printMode) return;
+    const timer = setTimeout(() => {
+      window.print();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [printMode]);
 
   useEffect(() => {
     const fetchBooking = async () => {
@@ -695,7 +704,14 @@ export default function ContractPage() {
 
   if (!booking) return null;
 
-  if (success) {
+  const handleDownload = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('print', '1');
+    url.searchParams.delete('payment');
+    window.open(url.toString(), '_blank', 'noopener,noreferrer');
+  };
+
+  if (success && !printMode) {
     const successMessage = copy.success.body.replace('{name}', booking.cliente.nombre);
     const successDate = format(new Date(booking.fecha_inicio), getDateFormat(), { locale });
     const successLocation = getLocationLabel(booking.ubicacion_entrega);
@@ -722,7 +738,7 @@ export default function ContractPage() {
           </div>
 
           <button
-            onClick={() => window.print()}
+            onClick={handleDownload}
             className="btn-primary w-full py-3"
           >
             <Download size={20} /> {copy.success.download}
