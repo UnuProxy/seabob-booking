@@ -168,7 +168,7 @@ export default function ContractsPage() {
               ) : (
                 filteredBookings.map((booking) => {
                   const contractUrl = booking.token_acceso
-                    ? `/contract/${booking.id}?t=${booking.token_acceso}`
+                    ? `/contract/${booking.id}?t=${booking.token_acceso}&view=admin`
                     : null;
                   const statusClass = statusStyles[booking.estado] || 'bg-slate-100 text-slate-600 border-slate-200';
 
