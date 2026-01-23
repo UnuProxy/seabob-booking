@@ -384,6 +384,7 @@ export default function ContractPage() {
   const [signature, setSignature] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [paymentSyncAttempted, setPaymentSyncAttempted] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -413,6 +414,19 @@ export default function ContractPage() {
           setBooking(data);
           if (data.acuerdo_firmado) {
             setSuccess(true);
+          }
+
+          if (paymentStatus === 'success' && !data.pago_realizado && !paymentSyncAttempted) {
+            setPaymentSyncAttempted(true);
+            try {
+              await fetch('/api/stripe/confirm-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bookingId: id, token }),
+              });
+            } catch (syncError) {
+              console.error('Error syncing Stripe payment:', syncError);
+            }
           }
 
           if (paymentStatus === 'success') {
