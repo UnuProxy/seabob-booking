@@ -59,7 +59,7 @@ export function LoginForm() {
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="w-full px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
+            className="w-full px-4 py-3 border border-slate-200 rounded-2xl bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
             required
           />
         </div>
@@ -70,7 +70,7 @@ export function LoginForm() {
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="w-full px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
+            className="w-full px-4 py-3 border border-slate-200 rounded-2xl bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900"
             required
           />
         </div>

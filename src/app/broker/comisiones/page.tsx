@@ -141,7 +141,7 @@ export default function BrokerComisionesPage() {
 
       {/* Pending Commission Info */}
       {pendiente > 0 && (
-        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-6">
+        <div className="bg-linear-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-6">
           <div className="flex items-start gap-4">
             <div className="p-3 bg-amber-100 rounded-full">
               <Wallet className="text-amber-600" size={24} />

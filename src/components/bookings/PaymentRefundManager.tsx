@@ -4,17 +4,17 @@ import { useState } from 'react';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, PaymentMethod } from '@/types';
-import { 
-  CreditCard, 
-  DollarSign, 
-  CheckCircle, 
-  XCircle, 
-  RefreshCcw, 
+import {
+  CreditCard,
+  Euro,
+  CheckCircle,
+  XCircle,
+  RefreshCcw,
   AlertCircle,
   Wallet,
   Building2,
   Banknote,
-  MoreHorizontal
+  MoreHorizontal,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -131,7 +131,7 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 rounded-t-2xl">
+        <div className="sticky top-0 bg-linear-to-r from-blue-600 to-blue-700 text-white p-6 rounded-t-2xl">
           <div className="flex justify-between items-start">
             <div>
               <h2 className="text-2xl font-bold mb-1">Gestión de Pagos y Reembolsos</h2>
@@ -200,7 +200,7 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
           {!isPaid && !isRefunded && (
             <div className="border border-green-200 bg-green-50 rounded-xl p-5">
               <div className="flex items-center gap-2 mb-4">
-                <DollarSign className="text-green-600" size={24} />
+                <Euro className="text-green-600" size={24} />
                 <h3 className="text-lg font-bold text-green-900">Registrar Pago</h3>
               </div>
 

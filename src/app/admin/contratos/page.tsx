@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { Booking } from '@/types';
+import { useAuthStore } from '@/store/authStore';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Copy, ExternalLink, FileText } from 'lucide-react';
@@ -16,35 +17,87 @@ const statusStyles: Record<string, string> = {
   cancelada: 'bg-rose-100 text-rose-700 border-rose-200',
 };
 
-const getSafeDate = (value: any): Date => {
+const getSafeDate = (value: unknown): Date => {
   if (!value) return new Date();
-  if (typeof value?.toDate === 'function') return value.toDate();
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'toDate' in value &&
+    typeof (value as { toDate?: () => Date }).toDate === 'function'
+  ) {
+    return (value as { toDate: () => Date }).toDate();
+  }
   if (value instanceof Date) return value;
-  const parsed = new Date(value);
+  const parsed = new Date(value as string | number);
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 };
 
 export default function ContractsPage() {
+  const { user } = useAuthStore();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const now = new Date();
+
+  const isExpiredBooking = (booking: Booking) => {
+    if (booking.expirado || booking.estado === 'expirada') return true;
+    if (!booking.expiracion) return false;
+    if (booking.pago_realizado || booking.acuerdo_firmado) return false;
+    return now > getSafeDate(booking.expiracion);
+  };
+
+  const expireBookingIfNeeded = async (booking: Booking) => {
+    if (!booking.expiracion) return;
+    if (booking.expirado || booking.estado === 'expirada') return;
+    if (booking.pago_realizado || booking.acuerdo_firmado) return;
+
+    const expirationDate = getSafeDate(booking.expiracion);
+    if (now <= expirationDate) return;
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        estado: 'expirada',
+        expirado: true,
+        updated_at: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error('Error expiring booking:', booking.id, error);
+    }
+  };
 
   useEffect(() => {
-    const q = query(collection(db, 'bookings'), orderBy('creado_en', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    if (!user) return;
+
+    const bookingsRef = collection(db, 'bookings');
+    const bookingsQuery =
+      user.rol === 'admin'
+        ? query(bookingsRef, orderBy('creado_en', 'desc'))
+        : query(bookingsRef, where('creado_por', '==', user.id));
+    const unsubscribe = onSnapshot(bookingsQuery, (snapshot) => {
       const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as Booking[];
+      if (user.rol !== 'admin') {
+        data.sort((a, b) => getSafeDate(b.creado_en).getTime() - getSafeDate(a.creado_en).getTime());
+      }
       setBookings(data);
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
+
+  useEffect(() => {
+    if (!bookings.length) return;
+    bookings.forEach((booking) => {
+      expireBookingIfNeeded(booking);
+    });
+  }, [bookings]);
 
   const filteredBookings = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return bookings;
+    const visibleBookings = bookings.filter((booking) => !isExpiredBooking(booking));
+    if (!term) return visibleBookings;
 
-    return bookings.filter((booking) => {
+    return visibleBookings.filter((booking) => {
       const nombre = booking.cliente?.nombre?.toLowerCase() || '';
       const email = booking.cliente?.email?.toLowerCase() || '';
       const referencia = booking.numero_reserva?.toLowerCase() || '';

@@ -142,7 +142,7 @@ export default function BrokerDashboard() {
       {pendingCommission > 0 && (
         <Link 
           href="/broker/comisiones"
-          className="block bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl p-6 shadow-lg text-white hover:shadow-xl transition-all group"
+          className="block bg-linear-to-r from-amber-500 to-orange-500 rounded-xl p-6 shadow-lg text-white hover:shadow-xl transition-all group"
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">

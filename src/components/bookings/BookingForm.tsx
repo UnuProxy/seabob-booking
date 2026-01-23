@@ -25,8 +25,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   
-  const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd')); // Default same day (1 day service)
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const [startDate, setStartDate] = useState(todayStr);
+  const [endDate, setEndDate] = useState(todayStr); // Default same day (1 day service)
   const [items, setItems] = useState<BookingItem[]>([]);
   
   // Delivery Details
@@ -36,7 +37,6 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const [deliveryTime, setDeliveryTime] = useState('09:00'); // Default 9 AM
   
   const [notes, setNotes] = useState('');
-  const [status, setStatus] = useState<'pendiente' | 'confirmada'>('confirmada');
 
   // Fetch products
   useEffect(() => {
@@ -249,7 +249,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         fecha_inicio: startDate,
         fecha_fin: endDate,
         precio_total: totalAmount,
-        estado: status,
+        estado: 'pendiente',
         acuerdo_firmado: false,
         
         // Commission tracking (for broker/agency bookings)
@@ -276,7 +276,8 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         creado_en: serverTimestamp(),
         creado_por: user.id,
         ...(user.rol === 'broker' ? { broker_id: user.id } : {}),
-        ...(user.rol === 'agency' ? { agency_id: user.id } : {})
+        ...(user.rol === 'agency' ? { agency_id: user.id } : {}),
+        ...(user.rol === 'colaborador' ? { colaborador_id: user.id } : {})
       };
 
       // 1. Create booking
@@ -439,16 +440,10 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                 />
                 <p className="text-xs text-gray-500 mt-2">Úsalo para coordinar la entrega y resolver dudas.</p>
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Estado Inicial</label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as any)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                >
-                  <option value="confirmada">Confirmada</option>
-                  <option value="pendiente">Pendiente</option>
-                </select>
+              <div className="md:col-span-2">
+                <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                  Las reservas quedan en estado pendiente hasta recibir el pago completo.
+                </div>
               </div>
             </div>
           </section>
@@ -473,7 +468,13 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                 <input
                   type="date"
                   value={startDate}
-                  onChange={e => setStartDate(e.target.value)}
+                  min={todayStr}
+                  onChange={(e) => {
+                    const nextDate = e.target.value || todayStr;
+                    const safeDate = nextDate < todayStr ? todayStr : nextDate;
+                    setStartDate(safeDate);
+                    setEndDate(safeDate);
+                  }}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                   required
                 />
@@ -483,8 +484,11 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                 <input
                   type="date"
                   value={endDate}
-                  min={startDate}
-                  onChange={e => setEndDate(e.target.value)}
+                  min={startDate < todayStr ? todayStr : startDate}
+                  onChange={(e) => {
+                    const nextDate = e.target.value || startDate;
+                    setEndDate(nextDate < startDate ? startDate : nextDate);
+                  }}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                   required
                 />
@@ -723,4 +727,3 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     </div>
   );
 }
-

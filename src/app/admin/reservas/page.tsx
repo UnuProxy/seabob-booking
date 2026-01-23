@@ -6,6 +6,7 @@ import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
 import { PaymentRefundManager } from '@/components/bookings/PaymentRefundManager';
+import { useAuthStore } from '@/store/authStore';
 import { 
   CalendarDays, 
   Plus, 
@@ -35,6 +36,7 @@ import { es } from 'date-fns/locale';
 import clsx from 'clsx';
 
 export default function BookingsPage() {
+  const { user } = useAuthStore();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [products, setProducts] = useState<Record<string, Product>>({});
   const [users, setUsers] = useState<Record<string, User>>({});
@@ -43,9 +45,83 @@ export default function BookingsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'refunded'>('all');
   const [timeFilter, setTimeFilter] = useState<'today' | 'upcoming' | 'all'>('today');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
   const [paymentManaging, setPaymentManaging] = useState<Booking | null>(null);
+
+  const getDate = (timestamp: unknown): Date => {
+    if (!timestamp) return new Date();
+
+    if (
+      typeof timestamp === 'object' &&
+      timestamp !== null &&
+      'toDate' in timestamp &&
+      typeof (timestamp as { toDate?: () => Date }).toDate === 'function'
+    ) {
+      return (timestamp as { toDate: () => Date }).toDate();
+    }
+
+    if (timestamp instanceof Date) {
+      return timestamp;
+    }
+
+    const date = new Date(timestamp as string | number);
+    if (isNaN(date.getTime())) {
+      return new Date();
+    }
+
+    return date;
+  };
+
+  const adjustStockReservation = async (bookingToUpdate: Booking, delta: number) => {
+    if (!bookingToUpdate?.items?.length) return;
+    const start = getDate(bookingToUpdate.fecha_inicio);
+    const end = getDate(bookingToUpdate.fecha_fin);
+    const days = eachDayOfInterval({ start, end });
+    const batch = writeBatch(db);
+
+    days.forEach((day) => {
+      const dateStr = format(day, 'yyyy-MM-dd');
+      bookingToUpdate.items.forEach((item) => {
+        const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
+        batch.set(
+          stockRef,
+          {
+            fecha: dateStr,
+            producto_id: item.producto_id,
+            cantidad_reservada: increment(delta * item.cantidad),
+            actualizado_por: 'system',
+            timestamp: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      });
+    });
+
+    await batch.commit();
+  };
+
+  const expireBookingIfNeeded = async (booking: Booking) => {
+    if (!booking.expiracion) return;
+    if (booking.pago_realizado || booking.acuerdo_firmado) return;
+    if (booking.expirado || booking.estado === 'expirada') return;
+
+    const expirationDate = getDate(booking.expiracion);
+    if (new Date() <= expirationDate) return;
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        estado: 'expirada',
+        expirado: true,
+        updated_at: serverTimestamp(),
+      });
+      await adjustStockReservation(booking, -1);
+    } catch (error) {
+      console.error('Error expiring booking:', error);
+    }
+  };
 
   // Fetch products for reference
   useEffect(() => {
@@ -63,6 +139,9 @@ export default function BookingsPage() {
 
   // Fetch users (brokers, agencies, collaborators) for reference
   useEffect(() => {
+    if (!user) return;
+    if (user.rol !== 'admin') return;
+
     const fetchUsers = async () => {
       const q = query(collection(db, 'users'));
       const snapshot = await getDocs(q);
@@ -73,22 +152,41 @@ export default function BookingsPage() {
       setUsers(userMap);
     };
     fetchUsers();
-  }, []);
+  }, [user]);
 
   // Real-time bookings
   useEffect(() => {
-    const q = query(collection(db, 'bookings'), orderBy('creado_en', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const bookingsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Booking[];
-      setBookings(bookingsData);
-      setLoading(false);
-    });
+    if (!user) return;
+
+    const bookingsRef = collection(db, 'bookings');
+    const bookingsQuery =
+      user.rol === 'admin'
+        ? query(bookingsRef, orderBy('creado_en', 'desc'))
+        : query(bookingsRef, where('creado_por', '==', user.id));
+
+    const unsubscribe = onSnapshot(
+      bookingsQuery,
+      (snapshot) => {
+        const bookingsData = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Booking[];
+
+        if (user.rol !== 'admin') {
+          bookingsData.sort((a, b) => getDate(b.creado_en).getTime() - getDate(a.creado_en).getTime());
+        }
+
+        setBookings(bookingsData);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Error fetching bookings:', error);
+        setLoading(false);
+      }
+    );
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   const handleCancelBooking = async (booking: Booking) => {
     if (!confirm(`¿Estás seguro de que deseas cancelar la reserva ${booking.numero_reserva}?\n\nEsto cambiará el estado a "cancelada" pero mantendrá el registro.`)) {
@@ -186,82 +284,14 @@ export default function BookingsPage() {
       .join(', ');
   };
 
-  // Helper to safely convert Firestore timestamp to Date
-  const getDate = (timestamp: any): Date => {
-    if (!timestamp) return new Date();
-    
-    // Firestore Timestamp
-    if (timestamp && typeof timestamp.toDate === 'function') {
-      return timestamp.toDate();
-    }
-    
-    // Already a Date
-    if (timestamp instanceof Date) {
-      return timestamp;
-    }
-    
-    // String or number
-    const date = new Date(timestamp);
-    if (isNaN(date.getTime())) {
-      return new Date(); // Fallback to current date if invalid
-    }
-    
-    return date;
-  };
-
-  const adjustStockReservation = async (bookingToUpdate: Booking, delta: number) => {
-    if (!bookingToUpdate?.items?.length) return;
-    const start = getDate(bookingToUpdate.fecha_inicio);
-    const end = getDate(bookingToUpdate.fecha_fin);
-    const days = eachDayOfInterval({ start, end });
-    const batch = writeBatch(db);
-
-    days.forEach((day) => {
-      const dateStr = format(day, 'yyyy-MM-dd');
-      bookingToUpdate.items.forEach((item) => {
-        const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
-        batch.set(
-          stockRef,
-          {
-            fecha: dateStr,
-            producto_id: item.producto_id,
-            cantidad_reservada: increment(delta * item.cantidad),
-            actualizado_por: 'system',
-            timestamp: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      });
-    });
-
-    await batch.commit();
-  };
-
-  const expireBookingIfNeeded = async (booking: Booking) => {
-    if (!booking.expiracion) return;
-    if (booking.pago_realizado || booking.acuerdo_firmado) return;
-    if (booking.expirado || booking.estado === 'expirada') return;
-
-    const expirationDate = getDate(booking.expiracion);
-    if (new Date() <= expirationDate) return;
-
-    try {
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        estado: 'expirada',
-        expirado: true,
-        updated_at: serverTimestamp(),
-      });
-      await adjustStockReservation(booking, -1);
-    } catch (error) {
-      console.error('Error expiring booking:', error);
-    }
-  };
-
   const filteredBookings = bookings.filter(booking => {
     const bookingStart = getDate(booking.fecha_inicio);
     const bookingEnd = getDate(booking.fecha_fin);
     const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
     const todayEnd = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999);
+    const hasDateRange = Boolean(dateFrom || dateTo);
+    const rangeStart = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null;
+    const rangeEnd = dateTo ? new Date(`${dateTo}T23:59:59`) : null;
 
     const matchesSearch = 
       booking.cliente.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -276,8 +306,9 @@ export default function BookingsPage() {
       (paymentFilter === 'unpaid' && !booking.pago_realizado) ||
       (paymentFilter === 'refunded' && booking.reembolso_realizado);
 
-    const matchesTime =
-      timeFilter === 'all'
+    const matchesTime = hasDateRange
+      ? (!rangeStart || bookingEnd >= rangeStart) && (!rangeEnd || bookingStart <= rangeEnd)
+      : timeFilter === 'all'
         ? true
         : timeFilter === 'today'
           ? bookingEnd >= todayStart && bookingStart <= todayEnd
@@ -430,7 +461,7 @@ export default function BookingsPage() {
 
       {/* Filters & Search */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
-        <div className="relative w-full lg:w-96">
+        <div className="relative w-full lg:flex-1 lg:max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
           <input
             type="text"
@@ -441,60 +472,83 @@ export default function BookingsPage() {
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          {(['today', 'upcoming', 'all'] as const).map((range) => (
-            <button
-              key={range}
-              onClick={() => setTimeFilter(range)}
-              className={clsx(
-                "whitespace-nowrap",
-                timeFilter === range ? "btn-primary" : "btn-outline"
-              )}
-            >
-              {range === 'today' ? 'Hoy' : range === 'upcoming' ? 'Próximas' : 'Todas'}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 w-full lg:w-auto">
+          <span className="text-xs font-semibold text-gray-500 uppercase">Rango</span>
+          <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1">
+            {(['today', 'upcoming', 'all'] as const).map((range) => (
+              <button
+                key={range}
+                onClick={() => setTimeFilter(range)}
+                className={clsx(
+                  "whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold transition",
+                  timeFilter === range
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "text-gray-600 hover:text-gray-900"
+                )}
+              >
+                {range === 'today' ? 'Hoy' : range === 'upcoming' ? 'Próximas' : 'Todas'}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          {['all', 'pendiente', 'confirmada', 'completada', 'cancelada', 'expirada'].map((status) => (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              className={clsx(
-                "whitespace-nowrap capitalize",
-                statusFilter === status 
-                  ? "btn-primary"
-                  : "btn-outline"
-              )}
-            >
-              {status === 'all' ? 'Todos' : status}
-            </button>
-          ))}
+        <div className="flex items-center gap-3 w-full lg:w-auto">
+          <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="dateFrom">
+            Fechas
+          </label>
+          <div className="flex items-center gap-2 w-full">
+            <input
+              id="dateFrom"
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              className="w-full lg:w-40 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <span className="text-xs font-semibold text-gray-400">a</span>
+            <input
+              id="dateTo"
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              className="w-full lg:w-40 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          <div className="text-xs font-semibold text-gray-500 uppercase mr-1">Pago:</div>
-          {[
-            { value: 'all', label: 'Todos', icon: Filter },
-            { value: 'paid', label: 'Pagado', icon: CheckCircle2 },
-            { value: 'unpaid', label: 'Pendiente', icon: Clock },
-            { value: 'refunded', label: 'Reembolsado', icon: XCircle }
-          ].map(({value, label, icon: Icon}) => (
-            <button
-              key={value}
-              onClick={() => setPaymentFilter(value as any)}
-              className={clsx(
-                "whitespace-nowrap flex items-center gap-1.5",
-                paymentFilter === value 
-                  ? "btn-primary"
-                  : "btn-outline"
-              )}
-            >
-              <Icon size={16} />
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3 w-full lg:w-auto">
+          <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="statusFilter">
+            Estado
+          </label>
+          <select
+            id="statusFilter"
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="w-full lg:w-48 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="all">Todos</option>
+            <option value="pendiente">Pendiente</option>
+            <option value="confirmada">Confirmada</option>
+            <option value="completada">Completada</option>
+            <option value="cancelada">Cancelada</option>
+            <option value="expirada">Expirada</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-3 w-full lg:w-auto">
+          <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="paymentFilter">
+            Pago
+          </label>
+          <select
+            id="paymentFilter"
+            value={paymentFilter}
+            onChange={(event) => setPaymentFilter(event.target.value as any)}
+            className="w-full lg:w-44 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="all">Todos</option>
+            <option value="paid">Pagado</option>
+            <option value="unpaid">Pendiente</option>
+            <option value="refunded">Reembolsado</option>
+          </select>
         </div>
       </div>
 

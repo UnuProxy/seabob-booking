@@ -9,6 +9,8 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  query,
+  where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { BookingLink } from '@/types';
@@ -44,7 +46,13 @@ export default function BookingLinksPage() {
   useEffect(() => {
     if (!user) return;
 
-    const unsubscribe = onSnapshot(collection(db, 'booking_links'), (snapshot) => {
+    const linksRef = collection(db, 'booking_links');
+    const linksQuery =
+      user.rol === 'admin'
+        ? linksRef
+        : query(linksRef, where('creado_por', '==', user.id));
+
+    const unsubscribe = onSnapshot(linksQuery, (snapshot) => {
       const data = snapshot.docs.map((docSnap) => ({
         id: docSnap.id,
         ...docSnap.data(),

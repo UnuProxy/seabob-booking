@@ -18,7 +18,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { bookingId, amount, currency = 'eur', customerEmail, customerName, expiresAt } = await request.json();
+    const {
+      bookingId,
+      amount,
+      currency = 'eur',
+      customerEmail,
+      customerName,
+      clientEmail,
+      clientName,
+      expiresAt,
+      token,
+    } = await request.json();
 
     if (!bookingId || !amount) {
       return NextResponse.json(
@@ -26,6 +36,12 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const resolvedEmail = customerEmail || clientEmail;
+    const resolvedName = customerName || clientName;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const tokenParam = token ? `?t=${encodeURIComponent(token)}` : '';
+    const paymentParam = token ? '&' : '?';
 
     // Create Checkout Session
     const session = await stripe.checkout.sessions.create({
@@ -44,17 +60,18 @@ export async function POST(request: NextRequest) {
           quantity: 1,
         },
       ],
-      customer_email: customerEmail,
+      customer_email: resolvedEmail,
       metadata: {
         booking_id: bookingId,
-        customer_name: customerName || '',
+        customer_name: resolvedName || '',
+        booking_token: token || '',
       },
       locale: 'auto', // Auto-detect locale (will show EUR properly)
       ...(expiresAt && typeof expiresAt === 'number'
         ? { expires_at: Math.max(expiresAt, Math.floor(Date.now() / 1000) + 60) }
         : {}),
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/booking/${bookingId}?payment=success`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/booking/${bookingId}?payment=cancelled`,
+      success_url: `${appUrl}/contract/${bookingId}${tokenParam}${paymentParam}payment=success`,
+      cancel_url: `${appUrl}/contract/${bookingId}${tokenParam}${paymentParam}payment=cancelled`,
       // Enable automatic tax calculation if configured
       // automatic_tax: { enabled: true },
     });

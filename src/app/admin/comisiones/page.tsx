@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase/config';
 import { Booking, User, PagoComision, PartnerCommissionSummary, PaymentMethod } from '@/types';
-import { DollarSign, Users, Clock, CheckCircle, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Users, Clock, CheckCircle, X, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function ComisionesPage() {
   const [loading, setLoading] = useState(true);
