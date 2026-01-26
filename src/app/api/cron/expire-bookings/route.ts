@@ -1,17 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  collection,
-  doc,
-  getDocs,
-  increment,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-  writeBatch,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
+import { FieldValue } from 'firebase-admin/firestore';
+import { adminDb } from '@/lib/firebase/admin';
 import { Booking } from '@/types';
+import { releaseBookingStockOnceAdmin } from '@/lib/bookingStockAdmin';
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -49,11 +40,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const now = new Date();
-    const bookingsRef = collection(db, 'bookings');
-
     // Fetch pending bookings and filter by expiration time
-    const q = query(bookingsRef, where('estado', '==', 'pendiente'));
-    const snapshot = await getDocs(q);
+    const snapshot = await adminDb
+      .collection('bookings')
+      .where('estado', '==', 'pendiente')
+      .get();
 
     let expiredCount = 0;
     let releasedStockCount = 0;
@@ -70,46 +61,15 @@ export async function GET(request: NextRequest) {
 
       // Mark booking as expired and release stock
       try {
-        await updateDoc(doc(db, 'bookings', booking.id), {
+        await adminDb.collection('bookings').doc(booking.id).update({
           estado: 'expirada',
           expirado: true,
-          updated_at: serverTimestamp(),
+          updated_at: FieldValue.serverTimestamp(),
         });
         expiredCount += 1;
 
-        if (booking.items?.length) {
-          const start = getDate(booking.fecha_inicio);
-          const end = getDate(booking.fecha_fin);
-          const days = [];
-          for (
-            let day = new Date(start);
-            day <= end;
-            day.setDate(day.getDate() + 1)
-          ) {
-            days.push(new Date(day));
-          }
-
-          const batch = writeBatch(db);
-          days.forEach((day) => {
-            const dateStr = day.toISOString().split('T')[0];
-            booking.items.forEach((item) => {
-              const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
-              batch.set(
-                stockRef,
-                {
-                  fecha: dateStr,
-                  producto_id: item.producto_id,
-                  cantidad_reservada: increment(-1 * item.cantidad),
-                  actualizado_por: 'system_cron',
-                  timestamp: serverTimestamp(),
-                },
-                { merge: true }
-              );
-            });
-          });
-          await batch.commit();
-          releasedStockCount += 1;
-        }
+        await releaseBookingStockOnceAdmin(booking.id, 'system_cron');
+        releasedStockCount += 1;
       } catch (err) {
         console.error('Error expiring booking:', booking.id, err);
       }

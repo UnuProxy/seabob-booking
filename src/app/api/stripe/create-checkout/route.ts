@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
+import { adminDb } from '@/lib/firebase/admin';
+import type { Booking } from '@/types';
 
 // Initialize Stripe only if keys are present
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -18,30 +20,54 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const {
-      bookingId,
-      amount,
-      currency = 'eur',
-      customerEmail,
-      customerName,
-      clientEmail,
-      clientName,
-      expiresAt,
-      token,
-    } = await request.json();
+    const { bookingId, token } = await request.json();
 
-    if (!bookingId || !amount) {
+    if (!bookingId) {
       return NextResponse.json(
-        { error: 'Missing required fields: bookingId and amount' },
+        { error: 'Missing required fields: bookingId' },
         { status: 400 }
       );
     }
 
-    const resolvedEmail = customerEmail || clientEmail;
-    const resolvedName = customerName || clientName;
+    const bookingRef = adminDb.collection('bookings').doc(bookingId);
+    const bookingSnap = await bookingRef.get();
+    if (!bookingSnap.exists) {
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
+    }
+
+    const booking = bookingSnap.data() as Booking;
+    if (booking.token_acceso && booking.token_acceso !== token) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 403 });
+    }
+
+    if (booking.pago_realizado) {
+      return NextResponse.json({ error: 'Booking already paid' }, { status: 409 });
+    }
+
+    if (booking.expirado || booking.estado === 'expirada') {
+      return NextResponse.json({ error: 'Booking expired' }, { status: 409 });
+    }
+
+    if (!Number.isFinite(booking.precio_total) || booking.precio_total <= 0) {
+      return NextResponse.json({ error: 'Invalid booking amount' }, { status: 400 });
+    }
+
+    const resolvedEmail = booking.cliente?.email;
+    const resolvedName = booking.cliente?.nombre;
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const tokenParam = token ? `?t=${encodeURIComponent(token)}` : '';
-    const paymentParam = token ? '&' : '?';
+    const bookingToken = booking.token_acceso || token || '';
+    const tokenParam = bookingToken ? `?t=${encodeURIComponent(bookingToken)}` : '';
+    const paymentParam = bookingToken ? '&' : '?';
+    const rawExpirationDate =
+      booking.expiracion && typeof booking.expiracion?.toDate === 'function'
+        ? booking.expiracion.toDate()
+        : booking.expiracion instanceof Date
+          ? booking.expiracion
+          : booking.expiracion
+            ? new Date(booking.expiracion)
+            : null;
+    const expirationDate =
+      rawExpirationDate && !isNaN(rawExpirationDate.getTime()) ? rawExpirationDate : null;
 
     // Create Checkout Session
     const session = await stripe.checkout.sessions.create({
@@ -55,7 +81,7 @@ export async function POST(request: NextRequest) {
               name: `Reserva SeaBob #${bookingId}`,
               description: 'Alquiler de SeaBob',
             },
-            unit_amount: Math.round(amount * 100), // Convert to cents
+            unit_amount: Math.round(booking.precio_total * 100), // Convert to cents
           },
           quantity: 1,
         },
@@ -64,11 +90,11 @@ export async function POST(request: NextRequest) {
       metadata: {
         booking_id: bookingId,
         customer_name: resolvedName || '',
-        booking_token: token || '',
+        booking_token: bookingToken,
       },
       locale: 'auto', // Auto-detect locale (will show EUR properly)
-      ...(expiresAt && typeof expiresAt === 'number'
-        ? { expires_at: Math.max(expiresAt, Math.floor(Date.now() / 1000) + 60) }
+      ...(expirationDate
+        ? { expires_at: Math.max(Math.floor(expirationDate.getTime() / 1000), Math.floor(Date.now() / 1000) + 60) }
         : {}),
       success_url: `${appUrl}/contract/${bookingId}${tokenParam}${paymentParam}payment=success`,
       cancel_url: `${appUrl}/contract/${bookingId}${tokenParam}${paymentParam}payment=cancelled`,

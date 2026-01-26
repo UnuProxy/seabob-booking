@@ -133,6 +133,10 @@ export interface Booking {
   // Reservation expiration (hold period)
   expiracion?: Date | string; // When the reservation expires if not paid/signed
   expirado?: boolean; // Whether the reservation has expired
+
+  // Stock release tracking
+  stock_released?: boolean;
+  stock_released_at?: Date | string;
 }
 
 // Commission payment record

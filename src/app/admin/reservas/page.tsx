@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, deleteDoc, doc, where, getDocs, updateDoc, serverTimestamp, writeBatch, increment } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, deleteDoc, doc, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
 import { PaymentRefundManager } from '@/components/bookings/PaymentRefundManager';
 import { useAuthStore } from '@/store/authStore';
+import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { 
   CalendarDays, 
   Plus, 
@@ -31,7 +32,7 @@ import {
   Euro,
   Ban
 } from 'lucide-react';
-import { format, parseISO, eachDayOfInterval } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
 
@@ -76,34 +77,6 @@ export default function BookingsPage() {
     return date;
   };
 
-  const adjustStockReservation = async (bookingToUpdate: Booking, delta: number) => {
-    if (!bookingToUpdate?.items?.length) return;
-    const start = getDate(bookingToUpdate.fecha_inicio);
-    const end = getDate(bookingToUpdate.fecha_fin);
-    const days = eachDayOfInterval({ start, end });
-    const batch = writeBatch(db);
-
-    days.forEach((day) => {
-      const dateStr = format(day, 'yyyy-MM-dd');
-      bookingToUpdate.items.forEach((item) => {
-        const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
-        batch.set(
-          stockRef,
-          {
-            fecha: dateStr,
-            producto_id: item.producto_id,
-            cantidad_reservada: increment(delta * item.cantidad),
-            actualizado_por: 'system',
-            timestamp: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      });
-    });
-
-    await batch.commit();
-  };
-
   const expireBookingIfNeeded = async (booking: Booking) => {
     if (!booking.expiracion) return;
     if (booking.pago_realizado || booking.acuerdo_firmado) return;
@@ -118,7 +91,7 @@ export default function BookingsPage() {
         expirado: true,
         updated_at: serverTimestamp(),
       });
-      await adjustStockReservation(booking, -1);
+      await releaseBookingStockOnce(booking.id, 'system_expiration');
     } catch (error) {
       console.error('Error expiring booking:', error);
     }
@@ -195,9 +168,7 @@ export default function BookingsPage() {
     }
 
     try {
-      if (booking.estado !== 'expirada') {
-        await adjustStockReservation(booking, -1);
-      }
+      await releaseBookingStockOnce(booking.id, user?.id || 'admin_panel');
       await updateDoc(doc(db, 'bookings', booking.id), {
         estado: 'cancelada',
         updated_at: serverTimestamp()
@@ -220,9 +191,7 @@ export default function BookingsPage() {
     }
 
     try {
-      if (booking.estado !== 'expirada') {
-        await adjustStockReservation(booking, -1);
-      }
+      await releaseBookingStockOnce(booking.id, user?.id || 'admin_panel');
       await deleteDoc(doc(db, 'bookings', id));
       alert('Reserva eliminada permanentemente');
     } catch (error) {

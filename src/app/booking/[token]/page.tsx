@@ -3,20 +3,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
   getDocs,
   increment,
-  writeBatch,
   query,
   serverTimestamp,
   updateDoc,
   where,
+  runTransaction,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { BookingItem, BookingLink, Product } from '@/types';
+import { BookingItem, BookingLink, Product, User as AppUser } from '@/types';
 import { addDays, differenceInDays, format, eachDayOfInterval } from 'date-fns';
 import {
   Anchor,
@@ -40,6 +39,7 @@ export default function PublicBookingPage() {
   const token = params?.token as string;
 
   const [link, setLink] = useState<BookingLink | null>(null);
+  const [creatorUser, setCreatorUser] = useState<AppUser | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -127,6 +127,23 @@ export default function PublicBookingPage() {
     };
 
     fetchProducts();
+  }, [link]);
+
+  useEffect(() => {
+    if (!link?.creado_por) return;
+
+    const fetchCreator = async () => {
+      try {
+        const userSnap = await getDoc(doc(db, 'users', link.creado_por as string));
+        if (userSnap.exists()) {
+          setCreatorUser({ id: userSnap.id, ...userSnap.data() } as AppUser);
+        }
+      } catch (err) {
+        console.error('Error fetching link creator:', err);
+      }
+    };
+
+    fetchCreator();
   }, [link]);
 
   useEffect(() => {
@@ -264,10 +281,34 @@ export default function PublicBookingPage() {
         return {
           ...item,
           producto_nombre: product?.nombre || item.producto_id,
-          precio_unitario: product?.precio_diario || 0,
+          precio_unitario:
+            item.tipo_alquiler === 'hora'
+              ? product?.precio_hora || 0
+              : product?.precio_diario || 0,
           comision_percent: product?.comision || 0,
         };
       });
+
+      const getItemSubtotal = (item: BookingItem, product?: Product) => {
+        if (!product) return 0;
+        if (item.tipo_alquiler === 'dia') {
+          const start = new Date(startDate);
+          const end = new Date(endDate);
+          const days = Math.max(1, differenceInDays(end, start));
+          return product.precio_diario * days * item.cantidad;
+        }
+        return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
+      };
+
+      const commissionPartnerRole = creatorUser?.rol === 'broker' || creatorUser?.rol === 'agency';
+      const comisionTotal = commissionPartnerRole
+        ? itemsWithNames.reduce((total, item) => {
+            const product = products.find((p) => p.id === item.producto_id);
+            const itemPrice = getItemSubtotal(item, product);
+            const commissionRate = (item.comision_percent || 0) / 100;
+            return total + itemPrice * commissionRate;
+          }, 0)
+        : 0;
 
       // Calculate reservation expiration time (hold period)
       const fechaInicio = new Date(startDate);
@@ -307,46 +348,144 @@ export default function PublicBookingPage() {
         firma_cliente: null,
         terminos_aceptados: false,
         pago_realizado: false,
+        comision_total: comisionTotal,
+        comision_pagada: 0,
         expiracion: expiracion,
         expirado: false,
+        stock_released: false,
         notas: notes.trim() || null,
         creado_en: serverTimestamp(),
         creado_por: link.creado_por || null,
         public_link_id: link.id,
         origen: 'public_link',
+        ...(creatorUser?.rol === 'broker' ? { broker_id: creatorUser.id } : {}),
+        ...(creatorUser?.rol === 'agency' ? { agency_id: creatorUser.id } : {}),
+        ...(creatorUser?.rol === 'colaborador' ? { colaborador_id: creatorUser.id } : {}),
+        ...(!creatorUser || creatorUser.rol === 'admin' ? { cliente_directo: true } : {}),
       };
 
-      const docRef = await addDoc(collection(db, 'bookings'), bookingData);
-      const bookingId = docRef.id;
+      const bookingRef = doc(collection(db, 'bookings'));
+      const bookingId = bookingRef.id;
 
-      // Reserve stock immediately (hold during payment/signature window)
-      try {
+      const stockRequirements = () => {
         const start = new Date(startDate);
         const end = new Date(endDate);
         const days = eachDayOfInterval({ start, end });
-        const batch = writeBatch(db);
+        const requirements = new Map<string, { dateStr: string; productId: string; quantity: number }>();
 
         days.forEach((day) => {
           const dateStr = format(day, 'yyyy-MM-dd');
           itemsWithNames.forEach((item) => {
-            const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
-            batch.set(
+            if (!item.producto_id) return;
+            const key = `${dateStr}_${item.producto_id}`;
+            const current = requirements.get(key);
+            const nextQty = (current?.quantity || 0) + (item.cantidad || 0);
+            requirements.set(key, { dateStr, productId: item.producto_id, quantity: nextQty });
+          });
+        });
+
+        return Array.from(requirements.values());
+      };
+
+      try {
+        const requirements = stockRequirements();
+        await runTransaction(db, async (tx) => {
+          const linkRef = doc(db, 'booking_links', token);
+          const linkSnap = await tx.get(linkRef);
+          if (!linkSnap.exists()) {
+            throw new Error('LINK_INVALID');
+          }
+
+          const linkData = linkSnap.data() as BookingLink;
+          if (!linkData.activo) {
+            throw new Error('LINK_INACTIVE');
+          }
+
+          if (linkData.uso_unico && (linkData.usado || (linkData.reservas_creadas || 0) > 0)) {
+            throw new Error('LINK_USED');
+          }
+
+          for (const req of requirements) {
+            const stockRef = doc(db, 'daily_stock', `${req.dateStr}_${req.productId}`);
+            const stockSnap = await tx.get(stockRef);
+            const stockData = stockSnap.exists()
+              ? (stockSnap.data() as { cantidad_disponible?: number; cantidad_reservada?: number })
+              : undefined;
+            const available =
+              (stockData?.cantidad_disponible || 0) - (stockData?.cantidad_reservada || 0);
+            if (available <= 0) {
+              const productName = products.find((p) => p.id === req.productId)?.nombre || 'El producto seleccionado';
+              throw new Error(`STOCK:${productName}:0:${req.quantity}`);
+            }
+            if (req.quantity > available) {
+              const productName = products.find((p) => p.id === req.productId)?.nombre || 'El producto seleccionado';
+              throw new Error(`STOCK:${productName}:${available}:${req.quantity}`);
+            }
+          }
+
+          tx.set(bookingRef, bookingData);
+
+          for (const req of requirements) {
+            const stockRef = doc(db, 'daily_stock', `${req.dateStr}_${req.productId}`);
+            tx.set(
               stockRef,
               {
-                fecha: dateStr,
-                producto_id: item.producto_id,
-                cantidad_reservada: increment(item.cantidad),
+                fecha: req.dateStr,
+                producto_id: req.productId,
+                cantidad_reservada: increment(req.quantity),
                 actualizado_por: link.creado_por || 'public_link',
                 timestamp: serverTimestamp(),
               },
               { merge: true }
             );
-          });
-        });
+          }
 
-        await batch.commit();
-      } catch (stockError) {
-        console.error('Error reserving stock:', stockError);
+          const linkUpdates: Record<string, any> = {
+            reservas_creadas: (linkData.reservas_creadas || 0) + 1,
+            ultimo_acceso: serverTimestamp(),
+          };
+
+          if (linkData.uso_unico) {
+            linkUpdates.activo = false;
+            linkUpdates.usado = true;
+            linkUpdates.usado_en = serverTimestamp();
+          }
+
+          tx.update(linkRef, linkUpdates);
+        });
+      } catch (transactionError: any) {
+        if (transactionError?.message?.startsWith('STOCK:')) {
+          const [, productName, availableRaw] = transactionError.message.split(':');
+          const available = Number(availableRaw);
+          const message =
+            available <= 0
+              ? `❌ ${productName} no tiene stock disponible para las fechas seleccionadas. Por favor, elige otro producto o cambia las fechas.`
+              : `❌ ${productName} solo tiene ${available} unidad(es) disponible(s), pero solicitaste más. Reduce la cantidad o cambia las fechas.`;
+          setError(message);
+          setSubmitting(false);
+          return;
+        }
+
+        if (transactionError?.message === 'LINK_INVALID') {
+          setError('Este enlace no es válido.');
+          setSubmitting(false);
+          return;
+        }
+        if (transactionError?.message === 'LINK_INACTIVE') {
+          setError('Este enlace está desactivado.');
+          setSubmitting(false);
+          return;
+        }
+        if (transactionError?.message === 'LINK_USED') {
+          setError('Este enlace ya fue utilizado.');
+          setSubmitting(false);
+          return;
+        }
+
+        console.error('Error reserving stock:', transactionError);
+        setError('Hubo un problema al reservar el stock. Inténtalo otra vez.');
+        setSubmitting(false);
+        return;
       }
 
       let paymentUrl: string | undefined;
@@ -384,19 +523,6 @@ export default function PublicBookingPage() {
       } catch (paymentError) {
         console.error('Error creating payment link:', paymentError);
       }
-
-      const linkUpdates: Record<string, any> = {
-        reservas_creadas: increment(1),
-        ultimo_acceso: serverTimestamp(),
-      };
-
-      if (link.uso_unico) {
-        linkUpdates.activo = false;
-        linkUpdates.usado = true;
-        linkUpdates.usado_en = serverTimestamp();
-      }
-
-      await updateDoc(doc(db, 'booking_links', link.id), linkUpdates);
 
       const contractUrl = `${window.location.origin}/contract/${bookingId}?t=${contractToken}`;
       setSuccess({ contractUrl, paymentUrl });

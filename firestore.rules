@@ -1,0 +1,123 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return signedIn()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid))
+        : null;
+    }
+
+    function hasUserDoc() {
+      return signedIn() && userDoc().data != null;
+    }
+
+    function role() {
+      return hasUserDoc() ? userDoc().data.rol : null;
+    }
+
+    function isAdmin() {
+      return signedIn() && role() == 'admin';
+    }
+
+    function isStaff() {
+      return signedIn() && (role() == 'admin' || role() == 'colaborador');
+    }
+
+    function isPartner() {
+      return signedIn() && (role() == 'broker' || role() == 'agency');
+    }
+
+    function isActiveUser() {
+      return hasUserDoc() && userDoc().data.activo == true;
+    }
+
+    match /users/{userId} {
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == userId);
+      allow list: if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).changedKeys()
+            .hasOnly([
+              'requires_password_change',
+              'last_login_at',
+              'last_seen_at',
+              'whatsapp_conectado',
+              'whatsapp_numero',
+              'direccion_facturacion',
+              'nif_cif'
+            ])
+        );
+      allow delete: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow get, list: if resource.data.activo == true || isActiveUser();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /daily_stock/{stockId} {
+      allow get, list: if isActiveUser();
+      allow create, update, delete: if isStaff();
+    }
+
+    match /booking_links/{token} {
+      allow get: if resource.data.activo == true || isActiveUser();
+      allow list: if isStaff();
+      allow create, update, delete: if isStaff();
+    }
+
+    match /whatsapp_links/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /pagos_comisiones/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      allow get, list: if isStaff()
+        || (
+          isPartner()
+          && (
+            resource.data.broker_id == request.auth.uid
+            || resource.data.agency_id == request.auth.uid
+            || resource.data.creado_por == request.auth.uid
+          )
+        )
+        || (signedIn() && resource.data.creado_por == request.auth.uid);
+
+      allow create: if isStaff() || isPartner();
+
+      allow update: if isStaff()
+        || (
+          isPartner()
+          && (
+            resource.data.broker_id == request.auth.uid
+            || resource.data.agency_id == request.auth.uid
+            || resource.data.creado_por == request.auth.uid
+          )
+          && request.resource.data.diff(resource.data).changedKeys()
+            .hasOnly(['estado', 'updated_at', 'expirado', 'stock_released', 'stock_released_at'])
+        )
+        || (
+          signedIn()
+          && resource.data.creado_por == request.auth.uid
+          && request.resource.data.diff(resource.data).changedKeys()
+            .hasOnly(['estado', 'updated_at', 'expirado', 'stock_released', 'stock_released_at'])
+        );
+
+      allow delete: if isStaff() || (signedIn() && resource.data.creado_por == request.auth.uid);
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

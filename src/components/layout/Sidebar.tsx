@@ -39,23 +39,25 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   };
 
   const navItems = [
-    { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard, roles: ['admin', 'colaborador', 'broker', 'agency'] },
-    { name: 'Reservas', href: '/admin/reservas', icon: CalendarDays, roles: ['admin', 'colaborador', 'broker', 'agency'] },
-    { name: 'Productos', href: '/admin/productos', icon: Package, roles: ['admin'] },
-    { name: 'Stock Diario', href: '/admin/stock', icon: CalendarDays, roles: ['admin', 'colaborador'] },
-    { name: 'Usuarios', href: '/admin/usuarios', icon: Users, roles: ['admin'] },
-    { name: 'Brokers/Agencias', href: '/admin/partners', icon: Briefcase, roles: ['admin'] },
-    { name: 'Comisiones', href: '/admin/comisiones', icon: Coins, roles: ['admin'] },
-    { name: 'Finanzas', href: '/admin/finanzas', icon: LineChart, roles: ['admin'] },
-    { name: 'Enlaces Reserva', href: '/admin/enlaces-reservas', icon: Link2, roles: ['admin', 'colaborador'] },
-    { name: 'Contratos', href: '/admin/contratos', icon: FileText, roles: ['admin', 'colaborador'] },
-    { name: 'Configuración', href: '/admin/settings', icon: Settings, roles: ['admin'] },
+    { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard, roles: ['admin', 'colaborador', 'broker', 'agency'], group: 'primary' },
+    { name: 'Reservas', href: '/admin/reservas', icon: CalendarDays, roles: ['admin', 'colaborador', 'broker', 'agency'], group: 'primary' },
+    { name: 'Productos', href: '/admin/productos', icon: Package, roles: ['admin'], group: 'primary' },
+    { name: 'Stock Diario', href: '/admin/stock', icon: CalendarDays, roles: ['admin', 'colaborador'], group: 'primary' },
+    { name: 'Comisiones', href: '/admin/comisiones', icon: Coins, roles: ['admin'], group: 'secondary' },
+    { name: 'Finanzas', href: '/admin/finanzas', icon: LineChart, roles: ['admin'], group: 'secondary' },
+    { name: 'Enlaces Reserva', href: '/admin/enlaces-reservas', icon: Link2, roles: ['admin', 'colaborador'], group: 'secondary' },
+    { name: 'Contratos', href: '/admin/contratos', icon: FileText, roles: ['admin', 'colaborador'], group: 'secondary' },
+    { name: 'Brokers/Agencias', href: '/admin/partners', icon: Briefcase, roles: ['admin'], group: 'secondary' },
+    { name: 'Usuarios', href: '/admin/usuarios', icon: Users, roles: ['admin'], group: 'secondary' },
+    { name: 'Configuración', href: '/admin/settings', icon: Settings, roles: ['admin'], group: 'secondary' },
   ];
 
   // Filter items based on user role
   const filteredNavItems = navItems.filter(item => 
     user && item.roles.includes(user.rol)
   );
+  const primaryNavItems = filteredNavItems.filter(item => item.group === 'primary');
+  const secondaryNavItems = filteredNavItems.filter(item => item.group === 'secondary');
 
   return (
     <>
@@ -99,34 +101,68 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
-          {filteredNavItems.map((item) => {
-            const isActive = pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => {
-                  if (window.innerWidth < 1024) onClose();
-                }}
-                className={clsx(
-                  "flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-base",
-                  isActive 
-                    ? "bg-white/18 text-white shadow-[0_12px_30px_rgba(15,23,42,0.35)] translate-x-1" 
-                    : "text-blue-100/70 hover:bg-white/10 hover:text-white hover:translate-x-1"
-                )}
-              >
-                <item.icon 
-                  size={24} 
+        <nav className="flex-1 px-4 py-6 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
+          <div className="space-y-2">
+            {primaryNavItems.map((item) => {
+              const isActive = pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => {
+                    if (window.innerWidth < 1024) onClose();
+                  }}
                   className={clsx(
-                    "transition-colors",
-                    isActive ? "text-white" : "text-blue-200/60 group-hover:text-white"
-                  )} 
-                />
-                <span>{item.name}</span>
-              </Link>
-            );
-          })}
+                    "flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-base",
+                    isActive 
+                      ? "bg-white/18 text-white shadow-[0_12px_30px_rgba(15,23,42,0.35)] translate-x-1" 
+                      : "text-blue-100/70 hover:bg-white/10 hover:text-white hover:translate-x-1"
+                  )}
+                >
+                  <item.icon 
+                    size={24} 
+                    className={clsx(
+                      "transition-colors",
+                      isActive ? "text-white" : "text-blue-200/60 group-hover:text-white"
+                    )} 
+                  />
+                  <span>{item.name}</span>
+                </Link>
+              );
+            })}
+          </div>
+
+          {secondaryNavItems.length > 0 && (
+            <div className="mt-6 pt-6 border-t border-white/10 space-y-2">
+              {secondaryNavItems.map((item) => {
+                const isActive = pathname.startsWith(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => {
+                      if (window.innerWidth < 1024) onClose();
+                    }}
+                    className={clsx(
+                      "flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-base",
+                      isActive 
+                        ? "bg-white/18 text-white shadow-[0_12px_30px_rgba(15,23,42,0.35)] translate-x-1" 
+                        : "text-blue-100/70 hover:bg-white/10 hover:text-white hover:translate-x-1"
+                    )}
+                  >
+                    <item.icon 
+                      size={24} 
+                      className={clsx(
+                        "transition-colors",
+                        isActive ? "text-white" : "text-blue-200/60 group-hover:text-white"
+                      )} 
+                    />
+                    <span>{item.name}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
         </nav>
 
         {/* Footer User Profile */}

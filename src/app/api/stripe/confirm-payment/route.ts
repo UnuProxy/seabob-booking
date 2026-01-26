@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
+import { FieldPath, FieldValue } from 'firebase-admin/firestore';
+import { adminDb } from '@/lib/firebase/admin';
+import { calculateCommissionTotal, calculateCommissionTotalWithProducts } from '@/lib/commission';
+import type { Booking, Product } from '@/types';
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -26,14 +28,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const bookingRef = doc(db, 'bookings', bookingId);
-    const bookingSnap = await getDoc(bookingRef);
-    if (!bookingSnap.exists()) {
+    const bookingRef = adminDb.collection('bookings').doc(bookingId);
+    const bookingSnap = await bookingRef.get();
+    if (!bookingSnap.exists) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    const booking = bookingSnap.data() as Record<string, any>;
-    if (booking.token_acceso && token && booking.token_acceso !== token) {
+    const booking = bookingSnap.data() as Booking;
+    if (booking.token_acceso && booking.token_acceso !== token) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 403 });
     }
 
@@ -56,21 +58,64 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ updated: false, paid: false });
     }
 
+    const expectedAmount = Math.round((booking.precio_total || 0) * 100);
+    if (!Number.isFinite(expectedAmount) || expectedAmount <= 0) {
+      return NextResponse.json({ error: 'Invalid booking amount' }, { status: 409 });
+    }
+
+    if (typeof session.amount_total === 'number' && session.amount_total !== expectedAmount) {
+      return NextResponse.json({ error: 'Amount mismatch' }, { status: 409 });
+    }
+
+    if (session.currency && session.currency.toLowerCase() !== 'eur') {
+      return NextResponse.json({ error: 'Currency mismatch' }, { status: 409 });
+    }
+
+    if (session.metadata?.booking_id && session.metadata.booking_id !== bookingId) {
+      return NextResponse.json({ error: 'Booking mismatch' }, { status: 409 });
+    }
+
     const paymentIntentId =
       typeof session.payment_intent === 'string'
         ? session.payment_intent
         : session.payment_intent?.id;
 
-    await updateDoc(bookingRef, {
+    const hasPartner = Boolean(booking.broker_id || booking.agency_id);
+    let computedCommission = hasPartner ? calculateCommissionTotal(booking) : 0;
+
+    if (hasPartner && computedCommission <= 0 && booking.items?.length) {
+      const productIds = Array.from(
+        new Set(booking.items.map((item) => item.producto_id).filter(Boolean))
+      );
+      const productsById: Record<string, Product> = {};
+
+      for (let i = 0; i < productIds.length; i += 10) {
+        const chunk = productIds.slice(i, i + 10);
+        const snapshot = await adminDb
+          .collection('products')
+          .where(FieldPath.documentId(), 'in', chunk)
+          .get();
+        snapshot.docs.forEach((docSnap) => {
+          productsById[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as Product;
+        });
+      }
+
+      computedCommission = calculateCommissionTotalWithProducts(booking, productsById);
+    }
+
+    await bookingRef.update({
       pago_realizado: true,
-      pago_realizado_en: serverTimestamp(),
+      pago_realizado_en: FieldValue.serverTimestamp(),
       pago_metodo: 'stripe',
       pago_referencia: paymentIntentId || session.id,
       stripe_payment_intent_id: paymentIntentId,
       stripe_checkout_session_id: session.id,
       estado: 'confirmada',
-      confirmado_en: serverTimestamp(),
-      updated_at: serverTimestamp(),
+      confirmado_en: FieldValue.serverTimestamp(),
+      updated_at: FieldValue.serverTimestamp(),
+      ...(hasPartner && computedCommission > 0 && !(booking.comision_total && booking.comision_total > 0)
+        ? { comision_total: computedCommission, comision_pagada: booking.comision_pagada || 0 }
+        : {}),
     });
 
     return NextResponse.json({ updated: true });
