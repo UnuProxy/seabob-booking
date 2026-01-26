@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, addDoc, getDocs, query, where, serverTimestamp, doc, updateDoc, getDoc, writeBatch, increment } from 'firebase/firestore';
+import { collection, getDocs, query, where, serverTimestamp, doc, updateDoc, getDoc, increment, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Product, BookingItem, RentalType, DailyStock, User as AppUser } from '@/types';
 import { useAuthStore } from '@/store/authStore';
@@ -162,22 +162,22 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     setItems(items.filter((_, i) => i !== index));
   };
 
+  const getItemSubtotal = (item: BookingItem, product?: Product) => {
+    if (!product) return 0;
+    if (item.tipo_alquiler === 'dia') {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const days = Math.max(1, differenceInDays(end, start));
+      return product.precio_diario * days * item.cantidad;
+    }
+    return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
+  };
+
   // Calculate Total
   const calculateTotal = () => {
     return items.reduce((acc, item) => {
       const product = products.find(p => p.id === item.producto_id);
-      if (!product) return acc;
-
-      let price = 0;
-      if (item.tipo_alquiler === 'dia') {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const days = Math.max(1, differenceInDays(end, start));
-        price = product.precio_diario * days * item.cantidad;
-      } else {
-        price = (product.precio_hora || 0) * item.duracion * item.cantidad;
-      }
-      return acc + price;
+      return acc + getItemSubtotal(item, product);
     }, 0);
   };
 
@@ -223,14 +223,14 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       // Build items with product names, prices, and commission rates
       const itemsWithNames = items.map((item) => {
         const product = products.find((p) => p.id === item.producto_id);
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const days = Math.max(1, differenceInDays(end, start));
         
         return {
           ...item,
           producto_nombre: product?.nombre || item.producto_id,
-          precio_unitario: product?.precio_diario || 0,
+          precio_unitario:
+            item.tipo_alquiler === 'hora'
+              ? product?.precio_hora || 0
+              : product?.precio_diario || 0,
           comision_percent: product?.comision || 0, // Store commission rate at time of booking
         };
       });
@@ -243,9 +243,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         (user.rol === 'admin' && (partnerType === 'broker' || partnerType === 'agency'));
 
       if (commissionPartner) {
-        const days = Math.max(1, differenceInDays(new Date(endDate), new Date(startDate)));
         comisionTotal = itemsWithNames.reduce((total, item) => {
-          const itemPrice = (item.precio_unitario || 0) * item.cantidad * days;
+          const product = products.find((p) => p.id === item.producto_id);
+          const itemPrice = getItemSubtotal(item, product);
           const commissionRate = (item.comision_percent || 0) / 100;
           return total + (itemPrice * commissionRate);
         }, 0);
@@ -303,6 +303,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         // Reservation hold/expiration
         expiracion: expiracion,
         expirado: false,
+        stock_released: false,
 
         notas: notes,
         creado_en: serverTimestamp(),
@@ -317,39 +318,81 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         ...(user.rol === 'admin' && partnerType === 'colaborador' && partnerId ? { colaborador_id: partnerId } : {})
       };
 
-      // 1. Create booking
-      const docRef = await addDoc(collection(db, 'bookings'), bookingData);
-      const bookingId = docRef.id;
+      const bookingRef = doc(collection(db, 'bookings'));
+      const bookingId = bookingRef.id;
 
-      // 2. Reserve stock immediately (hold during payment/signature window)
-      try {
+      const stockRequirements = () => {
         const start = new Date(startDate);
         const end = new Date(endDate);
         const days = eachDayOfInterval({ start, end });
-        const batch = writeBatch(db);
+        const requirements = new Map<string, { dateStr: string; productId: string; quantity: number }>();
 
         days.forEach((day) => {
           const dateStr = format(day, 'yyyy-MM-dd');
           itemsWithNames.forEach((item) => {
-            const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
-            batch.set(
+            if (!item.producto_id) return;
+            const key = `${dateStr}_${item.producto_id}`;
+            const current = requirements.get(key);
+            const nextQty = (current?.quantity || 0) + (item.cantidad || 0);
+            requirements.set(key, { dateStr, productId: item.producto_id, quantity: nextQty });
+          });
+        });
+
+        return Array.from(requirements.values());
+      };
+
+      try {
+        const requirements = stockRequirements();
+        await runTransaction(db, async (tx) => {
+          for (const req of requirements) {
+            const stockRef = doc(db, 'daily_stock', `${req.dateStr}_${req.productId}`);
+            const stockSnap = await tx.get(stockRef);
+            const stockData = stockSnap.exists() ? (stockSnap.data() as DailyStock) : undefined;
+            const available = (stockData?.cantidad_disponible || 0) - (stockData?.cantidad_reservada || 0);
+            if (available <= 0) {
+              const productName = products.find(p => p.id === req.productId)?.nombre || 'El producto seleccionado';
+              throw new Error(`STOCK:${productName}:0:${req.quantity}`);
+            }
+            if (req.quantity > available) {
+              const productName = products.find(p => p.id === req.productId)?.nombre || 'El producto seleccionado';
+              throw new Error(`STOCK:${productName}:${available}:${req.quantity}`);
+            }
+          }
+
+          tx.set(bookingRef, bookingData);
+
+          for (const req of requirements) {
+            const stockRef = doc(db, 'daily_stock', `${req.dateStr}_${req.productId}`);
+            tx.set(
               stockRef,
               {
-                fecha: dateStr,
-                producto_id: item.producto_id,
-                cantidad_reservada: increment(item.cantidad),
+                fecha: req.dateStr,
+                producto_id: req.productId,
+                cantidad_reservada: increment(req.quantity),
                 actualizado_por: user.id,
                 timestamp: serverTimestamp(),
               },
               { merge: true }
             );
-          });
+          }
         });
+      } catch (stockError: any) {
+        if (stockError?.message?.startsWith('STOCK:')) {
+          const [, productName, availableRaw] = stockError.message.split(':');
+          const available = Number(availableRaw);
+          const message =
+            available <= 0
+              ? `❌ ${productName} no tiene stock disponible para las fechas seleccionadas. Por favor, elige otro producto o cambia las fechas.`
+              : `❌ ${productName} solo tiene ${available} unidad(es) disponible(s), pero solicitaste más. Reduce la cantidad o cambia las fechas.`;
+          setError(message);
+          setLoading(false);
+          return;
+        }
 
-        await batch.commit();
-      } catch (stockError) {
         console.error('Error reserving stock:', stockError);
-        // If stock reservation fails, we still keep the booking, but warn in console
+        setError('Error al reservar el stock. Inténtalo de nuevo.');
+        setLoading(false);
+        return;
       }
 
       if (!(user.rol === 'admin' && skipPayment)) {

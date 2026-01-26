@@ -7,15 +7,14 @@ import {
   documentId,
   getDoc,
   getDocs,
-  increment,
   query,
   serverTimestamp,
   updateDoc,
-  writeBatch,
   where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, BookingItem, Product } from '@/types';
+import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { useParams, useSearchParams } from 'next/navigation';
 import {
   Anchor,
@@ -29,7 +28,7 @@ import {
   PenTool,
   ShoppingBag,
 } from 'lucide-react';
-import { differenceInDays, format, eachDayOfInterval } from 'date-fns';
+import { differenceInDays, format } from 'date-fns';
 import { enUS, es } from 'date-fns/locale';
 
 const CONTRACT_COPY = {
@@ -498,34 +497,6 @@ export default function ContractPage() {
     return date;
   };
 
-  const adjustStockReservation = async (bookingToUpdate: Booking, delta: number) => {
-    if (!bookingToUpdate?.items?.length) return;
-    const start = new Date(bookingToUpdate.fecha_inicio);
-    const end = new Date(bookingToUpdate.fecha_fin);
-    const days = eachDayOfInterval({ start, end });
-    const batch = writeBatch(db);
-
-    days.forEach((day) => {
-      const dateStr = format(day, 'yyyy-MM-dd');
-      bookingToUpdate.items.forEach((item) => {
-        const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
-        batch.set(
-          stockRef,
-          {
-            fecha: dateStr,
-            producto_id: item.producto_id,
-            cantidad_reservada: increment(delta * item.cantidad),
-            actualizado_por: 'system_expiration',
-            timestamp: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      });
-    });
-
-    await batch.commit();
-  };
-
   useEffect(() => {
     const expireIfNeeded = async () => {
       if (!booking) return;
@@ -543,7 +514,7 @@ export default function ContractPage() {
             expirado: true,
             updated_at: serverTimestamp(),
           });
-          await adjustStockReservation(booking, -1);
+          await releaseBookingStockOnce(booking.id, 'system_expiration');
           setBooking((prev) =>
             prev ? { ...prev, estado: 'expirada', expirado: true } : prev
           );

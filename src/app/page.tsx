@@ -6,11 +6,11 @@ export default function Home() {
     <div className="min-h-svh bg-linear-to-b from-slate-950 via-slate-900 to-sky-800 text-white">
       <div className="relative overflow-hidden">
         <div
-          className="absolute -top-28 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-cyan-300/25 blur-3xl motion-safe:animate-[glow-float_12s_ease-in-out_infinite] hidden md:block"
+          className="absolute -top-28 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-cyan-300/20 blur-3xl motion-safe:animate-[glow-float_12s_ease-in-out_infinite] hidden md:block"
           aria-hidden="true"
         />
         <div
-          className="absolute -bottom-24 right-6 h-80 w-80 rounded-full bg-amber-200/20 blur-3xl motion-safe:animate-[glow-float_14s_ease-in-out_infinite] hidden md:block"
+          className="absolute -bottom-24 right-6 h-80 w-80 rounded-full bg-amber-200/15 blur-3xl motion-safe:animate-[glow-float_14s_ease-in-out_infinite] hidden md:block"
           style={{ animationDelay: '1.5s' }}
           aria-hidden="true"
         />
@@ -35,7 +35,7 @@ export default function Home() {
                     alt="SeaBob Center logo"
                     width={520}
                     height={200}
-                    className="relative z-10 w-44 sm:w-56 md:w-80 h-auto drop-shadow-[0_18px_38px_rgba(0,0,0,0.7)] brightness-200 contrast-150 saturate-150"
+                    className="relative z-10 w-44 sm:w-56 md:w-80 h-auto drop-shadow-[0_18px_38px_rgba(0,0,0,0.7)] brightness-150 contrast-125 saturate-140"
                     priority
                   />
                 </div>
@@ -44,7 +44,7 @@ export default function Home() {
                   <h1 className="text-2xl sm:text-4xl md:text-5xl font-semibold tracking-[-0.01em] leading-[1.08] font-display">
                     Bienvenido a SeaBob Center
                   </h1>
-                  <p className="hidden sm:block text-sm sm:text-lg md:text-xl text-blue-100/90 leading-snug">
+                  <p className="text-xs sm:text-lg md:text-xl text-blue-100/90 leading-snug">
                     Reserva SeaBobs en minutos: elige fechas, paga al 100% y firma el contrato
                     digitalmente.
                   </p>
@@ -73,15 +73,15 @@ export default function Home() {
                   ].map((step, index) => (
                     <div
                       key={step.title}
-                      className="rounded-2xl border border-white/15 bg-white/10 px-3 py-3 text-center md:text-left"
+                      className="rounded-2xl border border-white/15 bg-white/15 px-3 py-3 text-center md:text-left"
                     >
-                      <p className="text-[10px] uppercase tracking-[0.18em] text-blue-100/70">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-blue-100/80">
                         Paso {index + 1}
                       </p>
-                      <p className="text-[11px] sm:text-sm font-semibold text-white mt-1">
+                      <p className="text-xs sm:text-sm font-semibold text-white mt-1">
                         {step.title}
                       </p>
-                      <p className="text-[10px] sm:text-xs text-blue-100/80 mt-1">{step.note}</p>
+                      <p className="text-[11px] sm:text-xs text-blue-100/90 mt-1">{step.note}</p>
                     </div>
                   ))}
                 </div>

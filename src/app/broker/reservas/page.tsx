@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, deleteDoc, doc, serverTimestamp, writeBatch, increment } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { Booking, Product, User } from '@/types';
+import { Booking, Product } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
 import { useAuthStore } from '@/store/authStore';
+import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { useSearchParams } from 'next/navigation';
 import { 
   CalendarDays, 
@@ -23,7 +24,7 @@ import {
   Trash2,
   Ban
 } from 'lucide-react';
-import { format, eachDayOfInterval } from 'date-fns';
+import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
 
@@ -158,34 +159,6 @@ export default function BrokerReservasPage() {
     alert('Enlace del contrato copiado al portapapeles');
   };
 
-  const adjustStockReservation = async (bookingToUpdate: Booking, delta: number) => {
-    if (!bookingToUpdate?.items?.length) return;
-    const start = getDate(bookingToUpdate.fecha_inicio);
-    const end = getDate(bookingToUpdate.fecha_fin);
-    const days = eachDayOfInterval({ start, end });
-    const batch = writeBatch(db);
-
-    days.forEach((day) => {
-      const dateStr = format(day, 'yyyy-MM-dd');
-      bookingToUpdate.items.forEach((item) => {
-        const stockRef = doc(db, 'daily_stock', `${dateStr}_${item.producto_id}`);
-        batch.set(
-          stockRef,
-          {
-            fecha: dateStr,
-            producto_id: item.producto_id,
-            cantidad_reservada: increment(delta * item.cantidad),
-            actualizado_por: user?.id || 'system',
-            timestamp: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      });
-    });
-
-    await batch.commit();
-  };
-
   const expireBookingIfNeeded = async (booking: Booking) => {
     if (!booking.expiracion) return;
     if (booking.pago_realizado || booking.acuerdo_firmado) return;
@@ -200,7 +173,7 @@ export default function BrokerReservasPage() {
         expirado: true,
         updated_at: serverTimestamp(),
       });
-      await adjustStockReservation(booking, -1);
+      await releaseBookingStockOnce(booking.id, 'system_expiration');
     } catch (error) {
       console.error('Error expiring booking:', error);
     }
@@ -212,9 +185,7 @@ export default function BrokerReservasPage() {
     }
 
     try {
-      if (booking.estado !== 'expirada') {
-        await adjustStockReservation(booking, -1);
-      }
+      await releaseBookingStockOnce(booking.id, user?.id || 'broker_panel');
       await updateDoc(doc(db, 'bookings', booking.id), {
         estado: 'cancelada',
         updated_at: serverTimestamp()
@@ -237,9 +208,7 @@ export default function BrokerReservasPage() {
     }
 
     try {
-      if (booking.estado !== 'expirada') {
-        await adjustStockReservation(booking, -1);
-      }
+      await releaseBookingStockOnce(booking.id, user?.id || 'broker_panel');
       await deleteDoc(doc(db, 'bookings', booking.id));
       alert('Reserva eliminada permanentemente');
     } catch (error) {

@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, documentId } from 'firebase/firestore';
 import { db, auth } from '@/lib/firebase/config';
 import { Booking, User, PagoComision, PartnerCommissionSummary, PaymentMethod } from '@/types';
+import { calculateCommissionTotal, calculateCommissionTotalWithProducts } from '@/lib/commission';
 import { Users, Clock, CheckCircle, X, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function ComisionesPage() {
@@ -45,6 +46,51 @@ export default function ComisionesPage() {
         id: doc.id,
         ...doc.data()
       } as Booking));
+
+      const needsFix = bookings.filter((booking) => {
+        const hasPartner = Boolean(booking.broker_id || booking.agency_id);
+        if (!hasPartner || !booking.pago_realizado) return;
+        if (booking.comision_total && booking.comision_total > 0) return;
+        return true;
+      });
+
+      if (needsFix.length) {
+        const productIds = Array.from(
+          new Set(
+            needsFix
+              .flatMap((booking) => booking.items?.map((item) => item.producto_id) || [])
+              .filter(Boolean)
+          )
+        );
+        const productsById: Record<string, any> = {};
+
+        for (let i = 0; i < productIds.length; i += 10) {
+          const chunk = productIds.slice(i, i + 10);
+          const productsQuery = query(collection(db, 'products'), where(documentId(), 'in', chunk));
+          const snapshot = await getDocs(productsQuery);
+          snapshot.docs.forEach((docSnap) => {
+            productsById[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+          });
+        }
+
+        const commissionFixes = needsFix.map((booking) => {
+          let computed = calculateCommissionTotal(booking);
+          if (computed <= 0) {
+            computed = calculateCommissionTotalWithProducts(booking, productsById);
+          }
+          if (computed <= 0) return Promise.resolve();
+
+          booking.comision_total = computed;
+          booking.comision_pagada = booking.comision_pagada || 0;
+          return updateDoc(doc(db, 'bookings', booking.id), {
+            comision_total: computed,
+            comision_pagada: booking.comision_pagada || 0,
+            updated_at: serverTimestamp(),
+          });
+        });
+
+        await Promise.all(commissionFixes);
+      }
 
       // Build summaries per partner
       const summariesMap = new Map<string, PartnerCommissionSummary>();

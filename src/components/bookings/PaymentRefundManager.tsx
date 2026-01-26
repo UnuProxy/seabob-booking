@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where, documentId } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, PaymentMethod } from '@/types';
+import { calculateCommissionTotal, calculateCommissionTotalWithProducts } from '@/lib/commission';
+import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import {
   CreditCard,
   Euro,
@@ -59,15 +61,51 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
 
     try {
       const bookingRef = doc(db, 'bookings', booking.id);
-      await updateDoc(bookingRef, {
+      const updates: Record<string, any> = {
         pago_realizado: true,
         pago_realizado_en: serverTimestamp(),
         pago_metodo: paymentMethod,
         pago_referencia: paymentReference || 'Manual',
         estado: booking.estado === 'pendiente' ? 'confirmada' : booking.estado,
-        confirmado_en: booking.estado === 'pendiente' ? serverTimestamp() : booking.confirmado_en,
         updated_at: serverTimestamp(),
-      });
+      };
+
+      if (booking.estado === 'pendiente') {
+        updates.confirmado_en = serverTimestamp();
+      }
+
+      const hasPartner = Boolean(booking.broker_id || booking.agency_id);
+      if (hasPartner) {
+        let computedCommission = calculateCommissionTotal(booking);
+
+        if (computedCommission <= 0) {
+          const productIds = Array.from(
+            new Set(booking.items?.map((item) => item.producto_id).filter(Boolean))
+          );
+
+          if (productIds.length) {
+            const productsById: Record<string, any> = {};
+            for (let i = 0; i < productIds.length; i += 10) {
+              const chunk = productIds.slice(i, i + 10);
+              const q = query(collection(db, 'products'), where(documentId(), 'in', chunk));
+              const snapshot = await getDocs(q);
+              snapshot.docs.forEach((docSnap) => {
+                productsById[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+              });
+            }
+            computedCommission = calculateCommissionTotalWithProducts(booking, productsById);
+          }
+        }
+
+        if (computedCommission > 0 && !(booking.comision_total && booking.comision_total > 0)) {
+          updates.comision_total = computedCommission;
+          updates.comision_pagada = booking.comision_pagada || 0;
+        } else if (computedCommission <= 0 && !(booking.comision_total && booking.comision_total > 0)) {
+          console.warn('Commission remains 0 for booking', booking.id);
+        }
+      }
+
+      await updateDoc(bookingRef, updates);
 
       setSuccess('✅ Pago registrado correctamente');
       setTimeout(() => {
@@ -99,6 +137,35 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
     setSuccess('');
 
     try {
+      if (refundMethod === 'stripe') {
+        if (!booking.stripe_payment_intent_id) {
+          setError('Este pago no tiene un intent de Stripe asociado');
+          return;
+        }
+
+        const response = await fetch('/api/stripe/refund', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookingId: booking.id,
+            amount,
+            reason: refundReason,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.error || 'No se pudo procesar el reembolso en Stripe');
+        }
+
+        setSuccess('✅ Reembolso procesado en Stripe');
+        setTimeout(() => {
+          onUpdate?.();
+          onClose();
+        }, 1500);
+        return;
+      }
+
       const bookingRef = doc(db, 'bookings', booking.id);
       await updateDoc(bookingRef, {
         reembolso_realizado: true,
@@ -110,6 +177,12 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
         estado: 'cancelada', // Auto-cancel when refunded
         updated_at: serverTimestamp(),
       });
+
+      try {
+        await releaseBookingStockOnce(booking.id, 'manual_refund');
+      } catch (releaseError) {
+        console.error('Error releasing stock after refund:', releaseError);
+      }
 
       setSuccess('✅ Reembolso registrado correctamente');
       setTimeout(() => {
