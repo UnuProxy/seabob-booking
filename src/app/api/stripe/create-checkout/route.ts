@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { adminDb } from '@/lib/firebase/admin';
+import { getAdminDb } from '@/lib/firebase/admin';
 import type { Booking } from '@/types';
 
 // Initialize Stripe only if keys are present
@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const adminDb = getAdminDb();
     const bookingRef = adminDb.collection('bookings').doc(bookingId);
     const bookingSnap = await bookingRef.get();
     if (!bookingSnap.exists) {

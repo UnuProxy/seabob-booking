@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
-import { adminDb } from '@/lib/firebase/admin';
+import { getAdminDb } from '@/lib/firebase/admin';
 import type { Booking } from '@/types';
 import { releaseBookingStockOnceAdmin } from '@/lib/bookingStockAdmin';
 
@@ -20,6 +20,8 @@ export async function POST(request: NextRequest) {
     if (!stripe) {
       return NextResponse.json({ error: 'Stripe not configured' }, { status: 503 });
     }
+
+    const adminDb = getAdminDb();
 
     const { bookingId, amount, reason } = await request.json();
 

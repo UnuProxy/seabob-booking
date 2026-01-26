@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FieldPath, FieldValue } from 'firebase-admin/firestore';
-import { adminDb } from '@/lib/firebase/admin';
+import { getAdminDb } from '@/lib/firebase/admin';
 import Stripe from 'stripe';
 import { calculateCommissionTotal, calculateCommissionTotalWithProducts } from '@/lib/commission';
 import type { Booking, Product } from '@/types';
@@ -25,6 +25,8 @@ export async function POST(request: NextRequest) {
         { status: 503 }
       );
     }
+
+    const adminDb = getAdminDb();
 
     const body = await request.text();
     const signature = request.headers.get('stripe-signature');

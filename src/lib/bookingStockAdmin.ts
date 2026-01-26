@@ -1,6 +1,6 @@
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { eachDayOfInterval, format } from 'date-fns';
-import { adminDb } from '@/lib/firebase/admin';
+import { getAdminDb } from '@/lib/firebase/admin';
 import type { Booking } from '@/types';
 
 const getDate = (value: any): Date => {
@@ -13,6 +13,7 @@ const getDate = (value: any): Date => {
 };
 
 export async function releaseBookingStockOnceAdmin(bookingId: string, actor = 'system') {
+  const adminDb = getAdminDb();
   await adminDb.runTransaction(async (tx) => {
     const bookingRef = adminDb.collection('bookings').doc(bookingId);
     const bookingSnap = await tx.get(bookingRef);
