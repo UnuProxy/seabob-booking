@@ -58,13 +58,14 @@ export async function POST(request: NextRequest) {
     const bookingToken = booking.token_acceso || token || '';
     const tokenParam = bookingToken ? `?t=${encodeURIComponent(bookingToken)}` : '';
     const paymentParam = bookingToken ? '&' : '?';
+    const expirationValue = booking.expiracion as unknown;
     const rawExpirationDate =
-      booking.expiracion && typeof booking.expiracion?.toDate === 'function'
-        ? booking.expiracion.toDate()
-        : booking.expiracion instanceof Date
-          ? booking.expiracion
-          : booking.expiracion
-            ? new Date(booking.expiracion)
+      expirationValue && typeof (expirationValue as { toDate?: () => Date }).toDate === 'function'
+        ? (expirationValue as { toDate: () => Date }).toDate()
+        : expirationValue instanceof Date
+          ? expirationValue
+          : expirationValue
+            ? new Date(expirationValue as string)
             : null;
     const expirationDate =
       rawExpirationDate && !isNaN(rawExpirationDate.getTime()) ? rawExpirationDate : null;
