@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
-import { adminDb } from '@/lib/firebase/admin';
+import { getAdminDb } from '@/lib/firebase/admin';
 import { Booking } from '@/types';
 import { releaseBookingStockOnceAdmin } from '@/lib/bookingStockAdmin';
 
@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const adminDb = getAdminDb();
     const now = new Date();
     // Fetch pending bookings and filter by expiration time
     const snapshot = await adminDb
