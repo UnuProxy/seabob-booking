@@ -509,16 +509,8 @@ export default function PublicBookingPage() {
         });
 
         if (response.ok) {
-          const { url, sessionId } = await response.json();
+          const { url } = await response.json();
           paymentUrl = url;
-          
-          // Only update if we got valid values
-          if (url && sessionId) {
-            await updateDoc(doc(db, 'bookings', bookingId), {
-              stripe_checkout_session_id: sessionId,
-              stripe_payment_link: url,
-            });
-          }
         }
       } catch (paymentError) {
         console.error('Error creating payment link:', paymentError);
