@@ -25,6 +25,8 @@ export default function AdminLayout({
       } else if (user.rol === 'broker' || user.rol === 'agency') {
         // Redirect brokers/agencies to their own dashboard
         router.push('/broker/dashboard');
+      } else if (user.rol === 'delivery') {
+        router.push('/delivery/dashboard');
       }
     }
   }, [user, loading, router]);
@@ -45,7 +47,7 @@ export default function AdminLayout({
     );
   }
 
-  if (!user || user.rol === 'broker' || user.rol === 'agency') return null;
+  if (!user || user.rol === 'broker' || user.rol === 'agency' || user.rol === 'delivery') return null;
 
   return (
     <>

@@ -31,6 +31,10 @@ service cloud.firestore {
       return signedIn() && (role() == 'broker' || role() == 'agency');
     }
 
+    function isDelivery() {
+      return signedIn() && role() == 'delivery';
+    }
+
     function isActiveUser() {
       return hasUserDoc() && userDoc().data.activo == true;
     }
@@ -91,6 +95,7 @@ service cloud.firestore {
 
     match /bookings/{bookingId} {
       allow get, list: if isStaff()
+        || isDelivery()
         || (
           isPartner()
           && (

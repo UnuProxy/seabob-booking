@@ -4,15 +4,14 @@ import { useAuthStore } from '@/store/authStore';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { Menu, X, CalendarDays, LogOut, Briefcase, Wallet } from 'lucide-react';
+import { Menu, X, CalendarDays, LogOut, MapPin } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
 import Link from 'next/link';
 import clsx from 'clsx';
 import ForcePasswordChange from '@/components/auth/ForcePasswordChange';
-import { usePartnerCommissions } from '@/lib/firebase/hooks/usePartnerCommissions';
 
-export default function BrokerLayout({
+export default function DeliveryLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -21,26 +20,22 @@ export default function BrokerLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  
-  // Fetch commission data for the sidebar badge - must be called before any returns
-  const { pendiente: pendingCommission } = usePartnerCommissions(
-    user?.id,
-    user?.rol as 'broker' | 'agency' | undefined
-  );
 
   useEffect(() => {
     if (!loading) {
       if (!user) {
         router.push('/login');
-      } else if (user.rol !== 'broker' && user.rol !== 'agency') {
-        // Redirect non-brokers to their dashboard
-        router.push(user.rol === 'delivery' ? '/delivery/dashboard' : '/admin/dashboard');
+      } else if (user.rol !== 'delivery') {
+        if (user.rol === 'broker' || user.rol === 'agency') {
+          router.push('/broker/dashboard');
+        } else {
+          router.push('/admin/dashboard');
+        }
       }
     }
   }, [user, loading, router]);
 
   useEffect(() => {
-    // Scroll to top on route change
     window.scrollTo(0, 0);
   }, [pathname]);
 
@@ -60,32 +55,31 @@ export default function BrokerLayout({
     );
   }
 
-  if (!user || (user.rol !== 'broker' && user.rol !== 'agency')) return null;
+  if (!user || user.rol !== 'delivery') return null;
 
   const navItems = [
-    { name: 'Dashboard', href: '/broker/dashboard', icon: Briefcase },
-    { name: 'Mis Reservas', href: '/broker/reservas', icon: CalendarDays },
-    { name: 'Mis Comisiones', href: '/broker/comisiones', icon: Wallet, badge: pendingCommission > 0 ? `€${pendingCommission.toFixed(0)}` : undefined },
+    { name: 'Dashboard', href: '/delivery/dashboard', icon: MapPin },
+    { name: 'Entregas', href: '/delivery/reservas', icon: CalendarDays },
   ];
 
   return (
     <>
       <ForcePasswordChange />
-      
+
       {/* Mobile Overlay */}
-      <div 
+      <div
         className={clsx(
-          "fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300",
-          sidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+          'fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-300',
+          sidebarOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         )}
         onClick={() => setSidebarOpen(false)}
       />
 
       {/* Sidebar */}
-      <aside 
+      <aside
         className={clsx(
-          "fixed top-0 left-0 z-50 h-screen w-72 text-slate-100 transition-transform duration-300 lg:translate-x-0 shadow-xl flex flex-col bg-linear-to-b from-slate-950 via-blue-950 to-blue-900 border-r border-white/10 overflow-hidden",
-          sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          'fixed top-0 left-0 z-50 h-screen w-72 text-slate-100 transition-transform duration-300 lg:translate-x-0 shadow-xl flex flex-col bg-linear-to-b from-slate-950 via-blue-950 to-blue-900 border-r border-white/10 overflow-hidden',
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
         <div className="absolute -top-20 left-10 h-40 w-40 rounded-full bg-cyan-400/15 blur-3xl pointer-events-none" aria-hidden="true" />
@@ -103,7 +97,7 @@ export default function BrokerLayout({
               priority
             />
           </div>
-          <button 
+          <button
             onClick={() => setSidebarOpen(false)}
             className="lg:hidden btn-icon text-white/60 hover:text-white hover:bg-white/10 absolute right-4 top-4"
           >
@@ -123,30 +117,20 @@ export default function BrokerLayout({
                   if (window.innerWidth < 1024) setSidebarOpen(false);
                 }}
                 className={clsx(
-                  "flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-base",
-                  isActive 
-                    ? "bg-white/18 text-white shadow-[0_12px_30px_rgba(15,23,42,0.35)] translate-x-1" 
-                    : "text-blue-100/70 hover:bg-white/10 hover:text-white hover:translate-x-1"
+                  'flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-base',
+                  isActive
+                    ? 'bg-white/18 text-white shadow-[0_12px_30px_rgba(15,23,42,0.35)] translate-x-1'
+                    : 'text-blue-100/70 hover:bg-white/10 hover:text-white hover:translate-x-1'
                 )}
               >
-                <item.icon 
-                  size={24} 
+                <item.icon
+                  size={24}
                   className={clsx(
-                    "transition-colors",
-                    isActive ? "text-white" : "text-blue-200/60 group-hover:text-white"
-                  )} 
+                    'transition-colors',
+                    isActive ? 'text-white' : 'text-blue-200/60 group-hover:text-white'
+                  )}
                 />
                 <span className="flex-1">{item.name}</span>
-                {item.badge && (
-                  <span className={clsx(
-                    "px-2 py-0.5 text-xs font-bold rounded-full",
-                    isActive 
-                      ? "bg-white/20 text-white" 
-                      : "bg-emerald-400 text-emerald-950"
-                  )}>
-                    {item.badge}
-                  </span>
-                )}
               </Link>
             );
           })}
@@ -160,12 +144,10 @@ export default function BrokerLayout({
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-bold truncate text-white">{user?.nombre || 'Usuario'}</p>
-              <p className="text-xs text-blue-100/60 capitalize truncate">
-                {user?.rol === 'broker' ? 'Broker' : 'Agencia'}
-              </p>
+              <p className="text-xs text-blue-100/60 capitalize truncate">Equipo de entregas</p>
             </div>
           </div>
-          
+
           <button
             onClick={handleLogout}
             className="btn-light w-full text-red-100 hover:text-red-50"
@@ -175,12 +157,12 @@ export default function BrokerLayout({
           </button>
         </div>
       </aside>
-      
+
       <div className="min-h-screen bg-white lg:pl-72">
         {/* Mobile Header */}
         <header className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <div className="flex items-center gap-3">
-            <button 
+            <button
               onClick={() => setSidebarOpen(true)}
               className="btn-icon -ml-2 text-slate-600 hover:bg-slate-100"
             >
@@ -192,9 +174,7 @@ export default function BrokerLayout({
 
         {/* Main Content Area */}
         <main className="p-4 lg:p-8">
-          <div className="max-w-7xl mx-auto">
-            {children}
-          </div>
+          <div className="max-w-7xl mx-auto">{children}</div>
         </main>
       </div>
     </>

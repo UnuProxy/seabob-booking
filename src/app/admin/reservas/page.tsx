@@ -1066,10 +1066,6 @@ export default function BookingsPage() {
       {isModalOpen && (
         <BookingForm 
           onClose={() => setIsModalOpen(false)}
-          onSuccess={() => {
-            // The snapshot listener will automatically update the list
-            setIsModalOpen(false);
-          }}
         />
       )}
 

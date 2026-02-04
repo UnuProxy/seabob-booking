@@ -66,6 +66,8 @@ const CONTRACT_COPY = {
       boat: 'Barco',
       docking: 'Amarre',
       totalToPay: 'Total a Pagar',
+      rentalTotal: 'Alquiler',
+      deposit: 'Depósito reembolsable',
       duration: 'Duración',
       daysSingular: 'día',
       daysPlural: 'días',
@@ -228,6 +230,8 @@ const CONTRACT_COPY = {
       boat: 'Boat',
       docking: 'Berth',
       totalToPay: 'Total Due',
+      rentalTotal: 'Rental',
+      deposit: 'Refundable deposit',
       duration: 'Duration',
       daysSingular: 'day',
       daysPlural: 'days',
@@ -394,6 +398,8 @@ export default function ContractPage() {
   const [paymentSyncAttempted, setPaymentSyncAttempted] = useState(false);
   const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
   const [paymentLinkError, setPaymentLinkError] = useState<string | null>(null);
+  const depositTotal = booking?.deposito_total || 0;
+  const totalToPay = booking ? booking.precio_total + depositTotal : 0;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -433,7 +439,10 @@ export default function ContractPage() {
             setSuccess(true);
           }
 
-          if (paymentStatus === 'success' && !data.pago_realizado && !paymentSyncAttempted) {
+          const shouldSyncPayment =
+            !data.pago_realizado && !paymentSyncAttempted && data.stripe_checkout_session_id;
+
+          if ((paymentStatus === 'success' || shouldSyncPayment) && !data.pago_realizado && !paymentSyncAttempted) {
             setPaymentSyncAttempted(true);
             try {
               await fetch('/api/stripe/confirm-payment', {
@@ -446,7 +455,7 @@ export default function ContractPage() {
             }
           }
 
-          if (paymentStatus === 'success') {
+          if (paymentStatus === 'success' || shouldSyncPayment) {
             setTimeout(() => {
               fetchBooking();
             }, 2000);
@@ -911,10 +920,33 @@ export default function ContractPage() {
                   </span>
                 </div>
               ))}
+              <div className="border-t border-gray-200 pt-3 mt-3 space-y-2 text-sm">
+                <div className="flex justify-between items-center text-gray-700">
+                  <span>{copy.labels.rentalTotal}</span>
+                  <span>
+                    €{booking.precio_total.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+                {depositTotal > 0 && (
+                  <div className="flex justify-between items-center text-gray-700">
+                    <span>{copy.labels.deposit}</span>
+                    <span>
+                      €{depositTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {depositTotal > 0 && (
+                <p className="text-xs text-gray-500">
+                  {lang === 'es'
+                    ? 'El depósito se reembolsa en 24h si no hay incidencias.'
+                    : 'The deposit is refunded within 24h if there are no incidents.'}
+                </p>
+              )}
               <div className="border-t border-gray-200 pt-3 mt-3 flex justify-between items-center">
                 <span className="font-bold text-gray-900">{copy.labels.totalToPay}</span>
                 <span className="font-bold text-xl text-gray-900">
-                  €{booking.precio_total.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                  €{totalToPay.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                 </span>
               </div>
               {booking.notas && (
@@ -939,8 +971,8 @@ export default function ContractPage() {
                 </div>
                 <div className="text-sm text-red-600 mt-1">
                   {lang === 'es'
-                    ? 'El producto vuelve a estar disponible. Contacta con el agente para crear una nueva reserva.'
-                    : 'The product is available again. Please contact the agent to create a new booking.'}
+                    ? 'El enlace ha expirado. Solicita un nuevo enlace de reserva para continuar.'
+                    : 'This link has expired. Please request a new booking link to continue.'}
                 </div>
               </div>
             ) : booking.pago_realizado ? (
@@ -965,7 +997,7 @@ export default function ContractPage() {
                     <div className="font-bold text-blue-900 mb-1">{copy.payment.pending}</div>
                     <div className="text-sm text-blue-700">
                       {copy.labels.totalToPay}: €
-                      {booking.precio_total.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                      {totalToPay.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                     </div>
                   </div>
                   <div className="bg-blue-100 p-2 rounded-lg">
@@ -1000,6 +1032,13 @@ export default function ContractPage() {
                 {paymentLinkError && (
                   <div className="text-xs text-red-600 mt-2">{paymentLinkError}</div>
                 )}
+              </div>
+            )}
+            {depositTotal > 0 && (
+              <div className="mt-3 text-xs text-slate-500 text-center">
+                {lang === 'es'
+                  ? `Se cobra un depósito reembolsable de €${depositTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}. Se devuelve en 24h si no hay incidencias.`
+                  : `A refundable deposit of €${depositTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} is charged. It is refunded within 24h if there are no incidents.`}
               </div>
             )}
           </section>

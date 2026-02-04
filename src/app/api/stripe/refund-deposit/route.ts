@@ -3,7 +3,6 @@ import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebase/admin';
 import type { Booking } from '@/types';
-import { releaseBookingStockOnceAdmin } from '@/lib/bookingStockAdmin';
 
 const stripe = process.env.STRIPE_SECRET_KEY
   ? new Stripe(process.env.STRIPE_SECRET_KEY, {
@@ -22,14 +21,10 @@ export async function POST(request: NextRequest) {
     }
 
     const adminDb = getAdminDb();
+    const { bookingId } = await request.json();
 
-    const { bookingId, amount, reason } = await request.json();
-
-    if (!bookingId || typeof amount !== 'number') {
-      return NextResponse.json(
-        { error: 'Missing required fields: bookingId and amount' },
-        { status: 400 }
-      );
+    if (!bookingId) {
+      return NextResponse.json({ error: 'Missing bookingId' }, { status: 400 });
     }
 
     const bookingRef = adminDb.collection('bookings').doc(bookingId);
@@ -39,15 +34,16 @@ export async function POST(request: NextRequest) {
     }
 
     const booking = bookingSnap.data() as Booking;
-    if (booking.reembolso_realizado) {
-      return NextResponse.json({ error: 'Booking already refunded' }, { status: 409 });
-    }
+    const depositTotal = Number(booking.deposito_total || 0);
 
-    if (!booking.pago_realizado) {
-      return NextResponse.json(
-        { error: 'Booking is not marked as paid' },
-        { status: 409 }
-      );
+    if (depositTotal <= 0) {
+      return NextResponse.json({ error: 'No deposit to refund' }, { status: 409 });
+    }
+    if (booking.deposito_reembolsado) {
+      return NextResponse.json({ error: 'Deposit already refunded' }, { status: 409 });
+    }
+    if (!booking.pago_realizado || booking.pago_metodo !== 'stripe') {
+      return NextResponse.json({ error: 'Deposit refund requires Stripe payment' }, { status: 409 });
     }
 
     let paymentIntentId = booking.stripe_payment_intent_id || '';
@@ -68,51 +64,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const refundAmount = Number(amount);
-    const maxRefundable = (booking.precio_total || 0) + (booking.deposito_total || 0);
-    if (!Number.isFinite(refundAmount) || refundAmount <= 0 || refundAmount > maxRefundable) {
-      return NextResponse.json({ error: 'Invalid refund amount' }, { status: 400 });
-    }
+    const refundAmount = toCents(depositTotal);
+    const idempotencyKey = `deposit_refund_${bookingId}_${refundAmount}`;
 
-    const idempotencyKey = `refund_${bookingId}_${toCents(refundAmount)}`;
     const refund = await stripe.refunds.create(
       {
         payment_intent: paymentIntentId,
-        amount: toCents(refundAmount),
-        reason: reason ? 'requested_by_customer' : undefined,
+        amount: refundAmount,
+        reason: 'requested_by_customer',
         metadata: {
           booking_id: bookingId,
+          refund_type: 'deposit',
         },
       },
       { idempotencyKey }
     );
 
     await bookingRef.update({
-      reembolso_realizado: true,
-      reembolso_monto: refundAmount,
-      reembolso_fecha: FieldValue.serverTimestamp(),
-      reembolso_metodo: 'stripe',
-      reembolso_motivo: reason || 'Reembolso procesado en Stripe',
-      reembolso_referencia: refund.id,
-      stripe_refund_id: refund.id,
-      ...(paymentIntentId && paymentIntentId !== booking.stripe_payment_intent_id
-        ? { stripe_payment_intent_id: paymentIntentId }
-        : {}),
-      estado: 'cancelada',
+      deposito_reembolsado: true,
+      deposito_reembolsado_en: FieldValue.serverTimestamp(),
+      stripe_deposito_refund_id: refund.id,
       updated_at: FieldValue.serverTimestamp(),
     });
 
-    try {
-      await releaseBookingStockOnceAdmin(bookingId, 'stripe_refund');
-    } catch (releaseError) {
-      console.error('Error releasing stock after refund:', releaseError);
-    }
-
     return NextResponse.json({ refunded: true, refundId: refund.id });
   } catch (error: any) {
-    console.error('Stripe refund error:', error);
+    console.error('Stripe deposit refund error:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to create Stripe refund' },
+      { error: error.message || 'Failed to refund deposit' },
       { status: 500 }
     );
   }

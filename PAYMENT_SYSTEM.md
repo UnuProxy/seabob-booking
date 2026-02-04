@@ -20,7 +20,6 @@ The SeaBob Center booking system now includes a **bulletproof payment and refund
 For payments received through other methods (cash, bank transfer, etc.):
 - **Admin Interface**: Payment management button on each booking
 - **Payment Methods Supported**:
-  - 💵 Efectivo (Cash)
   - 🏦 Transferencia Bancaria (Bank Transfer)
   - 💳 Tarjeta (Manual Card Payment)
   - 🔒 Stripe (Automatic)
@@ -95,7 +94,6 @@ export interface Booking {
 
 export type PaymentMethod = 
   | 'stripe'          // Stripe payment
-  | 'efectivo'        // Cash
   | 'transferencia'   // Bank transfer
   | 'tarjeta'         // Card payment (manual)
   | 'otro';           // Other
@@ -215,7 +213,7 @@ If you want automatic Stripe payments:
 1. Go to **Admin → Reservas**
 2. Find the booking
 3. Click the **💳 Cobrar** button (orange if unpaid)
-4. Select payment method (Efectivo, Transferencia, etc.)
+4. Select payment method (Transferencia, Stripe, etc.)
 5. Enter payment reference (optional but recommended)
 6. Click **"Marcar como Pagado"**
 7. ✅ Done! Booking is now confirmed and paid

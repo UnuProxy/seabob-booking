@@ -45,7 +45,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     { name: 'Stock Diario', href: '/admin/stock', icon: CalendarDays, roles: ['admin', 'colaborador'], group: 'primary' },
     { name: 'Comisiones', href: '/admin/comisiones', icon: Coins, roles: ['admin'], group: 'secondary' },
     { name: 'Finanzas', href: '/admin/finanzas', icon: LineChart, roles: ['admin'], group: 'secondary' },
-    { name: 'Enlaces Reserva', href: '/admin/enlaces-reservas', icon: Link2, roles: ['admin', 'colaborador'], group: 'secondary' },
     { name: 'Contratos', href: '/admin/contratos', icon: FileText, roles: ['admin', 'colaborador'], group: 'secondary' },
     { name: 'Brokers/Agencias', href: '/admin/partners', icon: Briefcase, roles: ['admin'], group: 'secondary' },
     { name: 'Usuarios', href: '/admin/usuarios', icon: Users, roles: ['admin'], group: 'secondary' },

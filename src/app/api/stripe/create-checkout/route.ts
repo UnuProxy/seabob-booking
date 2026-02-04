@@ -50,9 +50,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Booking expired' }, { status: 409 });
     }
 
-    if (!Number.isFinite(booking.precio_total) || booking.precio_total <= 0) {
+    const depositTotal = Number(booking.deposito_total || 0);
+    const totalDue = (booking.precio_total || 0) + depositTotal;
+    if (!Number.isFinite(totalDue) || totalDue <= 0) {
       return NextResponse.json({ error: 'Invalid booking amount' }, { status: 400 });
     }
+
+    const rentalAmount = Math.round((booking.precio_total || 0) * 100);
+    const depositAmount = Math.round(depositTotal * 100);
 
     const resolvedEmail = booking.cliente?.email;
     const resolvedName = booking.cliente?.nombre;
@@ -83,27 +88,44 @@ export async function POST(request: NextRequest) {
       rawExpirationDate && !isNaN(rawExpirationDate.getTime()) ? rawExpirationDate : null;
 
     // Create Checkout Session
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+      {
+        price_data: {
+          currency: 'eur', // Force EUR only (no GBP or other currencies)
+          product_data: {
+            name: `Reserva SeaBob #${bookingId}`,
+            description: 'Alquiler de SeaBob',
+          },
+          unit_amount: rentalAmount, // Convert to cents
+        },
+        quantity: 1,
+      },
+    ];
+
+    if (depositAmount > 0) {
+      lineItems.push({
+        price_data: {
+          currency: 'eur',
+          product_data: {
+            name: 'Depósito reembolsable',
+            description: 'Se devuelve dentro de 24h si no hay incidencias.',
+          },
+          unit_amount: depositAmount,
+        },
+        quantity: 1,
+      });
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'], // Card payment (Apple Pay & Google Pay show automatically when available)
-      line_items: [
-        {
-          price_data: {
-            currency: 'eur', // Force EUR only (no GBP or other currencies)
-            product_data: {
-              name: `Reserva SeaBob #${bookingId}`,
-              description: 'Alquiler de SeaBob',
-            },
-            unit_amount: Math.round(booking.precio_total * 100), // Convert to cents
-          },
-          quantity: 1,
-        },
-      ],
+      line_items: lineItems,
       customer_email: resolvedEmail,
       metadata: {
         booking_id: bookingId,
         customer_name: resolvedName || '',
         booking_token: bookingToken,
+        deposit_amount: depositAmount > 0 ? depositAmount.toString() : '0',
       },
       locale: 'auto', // Auto-detect locale (will show EUR properly)
       ...(expirationDate

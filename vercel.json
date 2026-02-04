@@ -2,7 +2,11 @@
   "crons": [
     {
       "path": "/api/cron/expire-bookings",
-      "schedule": "0 * * * *"
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/refund-deposits",
+      "schedule": "15 * * * *"
     }
   ]
 }

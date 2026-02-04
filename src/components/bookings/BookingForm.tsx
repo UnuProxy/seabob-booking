@@ -6,11 +6,11 @@ import { db } from '@/lib/firebase/config';
 import { Product, BookingItem, RentalType, DailyStock, User as AppUser } from '@/types';
 import { useAuthStore } from '@/store/authStore';
 import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor, AlertCircle, PackageX } from 'lucide-react';
-import { format, differenceInDays, eachDayOfInterval } from 'date-fns';
+import { addDays, format, differenceInDays, eachDayOfInterval } from 'date-fns';
 
 interface BookingFormProps {
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess?: (data: { contractUrl: string; paymentUrl?: string; bookingId: string }) => void;
 }
 
 export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
@@ -20,15 +20,23 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const [partners, setPartners] = useState<AppUser[]>([]);
   const [productStock, setProductStock] = useState<Record<string, { available: number; isOutOfStock: boolean; isLowStock: boolean }>>({});
   const [error, setError] = useState('');
+  const [successData, setSuccessData] = useState<{
+    contractUrl: string;
+    paymentUrl?: string;
+    bookingId: string;
+  } | null>(null);
 
   // Form State
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   
-  const todayStr = format(new Date(), 'yyyy-MM-dd');
-  const [startDate, setStartDate] = useState(todayStr);
-  const [endDate, setEndDate] = useState(todayStr); // Default same day (1 day service)
+  const now = new Date();
+  const isPastCutoff = now.getHours() >= 17;
+  const minDate = isPastCutoff ? addDays(now, 1) : now;
+  const minDateStr = format(minDate, 'yyyy-MM-dd');
+  const [startDate, setStartDate] = useState(minDateStr);
+  const [endDate, setEndDate] = useState(minDateStr); // Default same day (1 day service)
   const [items, setItems] = useState<BookingItem[]>([]);
   
   // Delivery Details
@@ -173,19 +181,36 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
   };
 
-  // Calculate Total
-  const calculateTotal = () => {
+  const getItemDeposit = (item: BookingItem, product?: Product) => {
+    if (!product) return 0;
+    const deposit = product.deposito || 0;
+    return deposit * item.cantidad;
+  };
+
+  const calculateRentalTotal = () => {
     return items.reduce((acc, item) => {
       const product = products.find(p => p.id === item.producto_id);
       return acc + getItemSubtotal(item, product);
     }, 0);
   };
 
+  const calculateDepositTotal = () => {
+    return items.reduce((acc, item) => {
+      const product = products.find(p => p.id === item.producto_id);
+      return acc + getItemDeposit(item, product);
+    }, 0);
+  };
+
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
     if (!clientName || !clientEmail) {
       setError('El nombre y email del cliente son obligatorios');
+      return;
+    }
+    if (startDate < minDateStr) {
+      setError('No se pueden crear reservas para hoy después de las 17:00. Selecciona otra fecha.');
       return;
     }
     if (items.length === 0) {
@@ -218,7 +243,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       // Generate secure token for public access
       const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
-      const totalAmount = calculateTotal();
+      const rentalTotal = calculateRentalTotal();
+      const depositTotal = calculateDepositTotal();
+      const totalAmount = rentalTotal + depositTotal;
       
       // Build items with product names, prices, and commission rates
       const itemsWithNames = items.map((item) => {
@@ -232,6 +259,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
               ? product?.precio_hora || 0
               : product?.precio_diario || 0,
           comision_percent: product?.comision || 0, // Store commission rate at time of booking
+          deposito_unitario: product?.deposito || 0,
         };
       });
       
@@ -252,21 +280,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       }
       
       // Calculate reservation expiration time (hold period)
-      const fechaInicio = new Date(startDate);
-      const ahora = new Date();
-      const diasHastaInicio = differenceInDays(fechaInicio, ahora);
-      
       let expiracion: Date | null = null;
       if (!(user.rol === 'admin' && skipPayment)) {
-        let tiempoExpiracion: number; // in milliseconds
-        if (diasHastaInicio >= 7) {
-          // 7+ days away: 24 hours to pay/sign
-          tiempoExpiracion = 24 * 60 * 60 * 1000; // 24 hours
-        } else {
-          // Less than 7 days: 1 hour to pay/sign
-          tiempoExpiracion = 1 * 60 * 60 * 1000; // 1 hour
-        }
-        expiracion = new Date(ahora.getTime() + tiempoExpiracion);
+        expiracion = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
       }
       
       const bookingData = {
@@ -280,7 +296,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         items: itemsWithNames,
         fecha_inicio: startDate,
         fecha_fin: endDate,
-        precio_total: totalAmount,
+        precio_total: rentalTotal,
+        deposito_total: depositTotal,
+        ...(depositTotal > 0 ? { deposito_reembolsado: false } : {}),
         estado: user.rol === 'admin' && skipPayment ? 'confirmada' : 'pendiente',
         acuerdo_firmado: false,
         
@@ -395,6 +413,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         return;
       }
 
+      let paymentUrl: string | undefined;
       if (!(user.rol === 'admin' && skipPayment)) {
         // 3. Generate Stripe payment link
         try {
@@ -403,20 +422,21 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              bookingId,
-              amount: totalAmount,
-              currency: 'eur',
-              clientEmail,
-              clientName,
-              bookingRef: ref,
-              token,
-              expiresAt: expiracion ? Math.floor(expiracion.getTime() / 1000) : undefined,
-            }),
+              body: JSON.stringify({
+                bookingId,
+                amount: totalAmount,
+                currency: 'eur',
+                clientEmail,
+                clientName,
+                bookingRef: ref,
+                token,
+                expiresAt: expiracion ? Math.floor(expiracion.getTime() / 1000) : undefined,
+              }),
           });
 
           if (response.ok) {
-            await response.json();
+            const data = await response.json();
+            paymentUrl = data?.url;
           } else {
             console.error('Failed to create payment link');
             // Continue anyway - booking is created, payment link can be generated later
@@ -426,9 +446,11 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
           // Continue anyway - booking is created
         }
       }
-      
-      onSuccess();
-      onClose();
+
+      const contractUrl = `${window.location.origin}/contract/${bookingId}?t=${token}`;
+      const successPayload = { contractUrl, paymentUrl, bookingId };
+      setSuccessData(successPayload);
+      onSuccess?.(successPayload);
     } catch (err) {
       console.error(err);
       setError('Error al crear la reserva. Inténtalo de nuevo.');
@@ -437,8 +459,65 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     }
   };
 
-  const total = calculateTotal();
+  const rentalTotal = calculateRentalTotal();
+  const depositTotal = calculateDepositTotal();
+  const total = rentalTotal + depositTotal;
   const dayCount = Math.max(1, differenceInDays(new Date(endDate), new Date(startDate)));
+
+  const copyText = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  if (successData) {
+    return (
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
+          <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-800">Reserva creada</h2>
+              <p className="text-gray-500 text-sm mt-1">Copia los enlaces antes de cerrar.</p>
+            </div>
+            <button
+              onClick={onClose}
+              className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-200"
+            >
+              <X size={24} />
+            </button>
+          </div>
+
+          <div className="p-6 space-y-5">
+            <div className="border border-slate-200 rounded-xl p-4">
+              <p className="text-sm font-semibold text-slate-700 mb-2">Enlace del contrato</p>
+              <div className="flex flex-col md:flex-row gap-3">
+                <input
+                  readOnly
+                  value={successData.contractUrl}
+                  className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-slate-50"
+                />
+                <button
+                  type="button"
+                  onClick={() => copyText(successData.contractUrl)}
+                  className="btn-primary"
+                >
+                  Copiar
+                </button>
+              </div>
+            </div>
+
+            <div className="text-xs text-slate-500">
+              El enlace del contrato incluye el botón de pago.
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button onClick={onClose} className="btn-outline">
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -622,10 +701,10 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                 <input
                   type="date"
                   value={startDate}
-                  min={todayStr}
+                  min={minDateStr}
                   onChange={(e) => {
-                    const nextDate = e.target.value || todayStr;
-                    const safeDate = nextDate < todayStr ? todayStr : nextDate;
+                    const nextDate = e.target.value || minDateStr;
+                    const safeDate = nextDate < minDateStr ? minDateStr : nextDate;
                     setStartDate(safeDate);
                     setEndDate(safeDate);
                   }}
@@ -638,7 +717,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                 <input
                   type="date"
                   value={endDate}
-                  min={startDate < todayStr ? todayStr : startDate}
+                  min={startDate < minDateStr ? minDateStr : startDate}
                   onChange={(e) => {
                     const nextDate = e.target.value || startDate;
                     setEndDate(nextDate < startDate ? startDate : nextDate);
@@ -651,6 +730,11 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             <p className="mt-3 text-sm text-gray-500 bg-blue-50 inline-block px-3 py-1 rounded-lg border border-blue-100">
               Duración: <span className="font-bold text-blue-700">{dayCount} {dayCount === 1 ? 'día' : 'días'}</span>
             </p>
+            {isPastCutoff && (
+              <p className="mt-2 text-xs text-amber-700 bg-amber-50 inline-block px-3 py-1 rounded-lg border border-amber-100">
+                Después de las 17:00 no se permiten reservas para hoy.
+              </p>
+            )}
           </section>
 
           {/* Section 3: Delivery Details */}
@@ -856,6 +940,12 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         <div className="p-6 border-t border-gray-100 bg-white rounded-b-2xl flex justify-between items-center">
           <div className="flex flex-col">
             <span className="text-sm text-gray-500 font-medium">Total Estimado</span>
+            <div className="text-xs text-gray-500 mt-1 space-y-1">
+              <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
+              {depositTotal > 0 && (
+                <div>Depósito reembolsable: €{depositTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
+              )}
+            </div>
             <span className="text-3xl font-bold text-slate-900">€{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
           </div>
 

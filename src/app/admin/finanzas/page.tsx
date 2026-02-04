@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import {
-  Banknote,
   CreditCard,
   Euro,
   Landmark,
@@ -86,7 +85,6 @@ export default function FinanzasPage() {
   const finance = useMemo(() => {
     const methodTotals: MethodTotals = {
       stripe: { count: 0, amount: 0 },
-      efectivo: { count: 0, amount: 0 },
       transferencia: { count: 0, amount: 0 },
       tarjeta: { count: 0, amount: 0 },
       otro: { count: 0, amount: 0 },
@@ -118,7 +116,8 @@ export default function FinanzasPage() {
 
       if (booking.pago_realizado) {
         grossPaid += total;
-        const method = booking.pago_metodo || 'otro';
+        const rawMethod = booking.pago_metodo as string | undefined;
+        const method = rawMethod && rawMethod in methodTotals ? (rawMethod as PaymentMethod) : 'otro';
         methodTotals[method].count += 1;
         methodTotals[method].amount += total;
       }
@@ -180,12 +179,6 @@ export default function FinanzasPage() {
       label: 'Stripe',
       icon: CreditCard,
       tone: 'border-indigo-100 bg-indigo-50 text-indigo-700',
-    },
-    {
-      key: 'efectivo',
-      label: 'Efectivo',
-      icon: Banknote,
-      tone: 'border-emerald-100 bg-emerald-50 text-emerald-700',
     },
     {
       key: 'transferencia',
@@ -294,7 +287,7 @@ export default function FinanzasPage() {
               </p>
             </div>
             <div className="h-11 w-11 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
-              <Banknote size={20} />
+              <TrendingUp size={20} />
             </div>
           </div>
           <p className="text-xs text-slate-500 mt-3">Brutos menos reembolsos</p>

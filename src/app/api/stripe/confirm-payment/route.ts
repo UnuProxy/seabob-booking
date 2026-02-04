@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ updated: false, paid: false });
     }
 
-    const expectedAmount = Math.round((booking.precio_total || 0) * 100);
+    const expectedAmount = Math.round(((booking.precio_total || 0) + (booking.deposito_total || 0)) * 100);
     if (!Number.isFinite(expectedAmount) || expectedAmount <= 0) {
       return NextResponse.json({ error: 'Invalid booking amount' }, { status: 409 });
     }

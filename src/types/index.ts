@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'colaborador' | 'broker' | 'agency';
+export type UserRole = 'admin' | 'colaborador' | 'delivery' | 'broker' | 'agency';
 export type EntityType = 'individual' | 'broker' | 'agency';
 export type ProductType = 'seabob' | 'jetski' | 'servicio';
 export type RentalType = 'hora' | 'dia';
@@ -6,7 +6,6 @@ export type BookingStatus = 'pendiente' | 'confirmada' | 'completada' | 'cancela
 
 export type PaymentMethod = 
   | 'stripe'          // Stripe payment
-  | 'efectivo'        // Cash
   | 'transferencia'   // Bank transfer
   | 'tarjeta'         // Card payment (manual)
   | 'otro';           // Other
@@ -41,6 +40,7 @@ export interface Product {
   descripcion: string;
   precio_diario: number;
   precio_hora?: number; // Optional hourly rate
+  deposito?: number; // Refundable deposit amount
   comision: number; // Percentage (e.g., 15 = 15%)
   tipo: ProductType;
   imagen_url: string;
@@ -68,6 +68,7 @@ export interface BookingItem {
   producto_nombre?: string;
   precio_unitario?: number;
   comision_percent?: number; // Store the commission rate at time of booking
+  deposito_unitario?: number; // Refundable deposit per unit
 }
 
 export interface Booking {
@@ -106,6 +107,12 @@ export interface Booking {
   stripe_checkout_session_id?: string;
   stripe_payment_link?: string;
   stripe_payment_intent_id?: string;
+
+  // Deposit tracking
+  deposito_total?: number;
+  deposito_reembolsado?: boolean;
+  deposito_reembolsado_en?: Date | string;
+  stripe_deposito_refund_id?: string;
   
   // Refund tracking
   reembolso_realizado?: boolean;
