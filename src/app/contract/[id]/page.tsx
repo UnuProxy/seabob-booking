@@ -82,6 +82,9 @@ const CONTRACT_COPY = {
       redirectNote: 'Serás redirigido a Stripe para completar el pago de forma segura.',
       unavailableTitle: 'Enlace de pago no disponible',
       unavailableNote: 'Contacta con el agente para realizar el pago.',
+      generateLink: 'Generar enlace de pago',
+      generating: 'Generando enlace...',
+      generateError: 'No se pudo generar el enlace de pago.',
       direct: 'Pago directo',
       requiredWarning: '⚠️ Debes completar el pago antes de poder firmar el contrato',
       requiredNote: 'Una vez realizado el pago, podrás aceptar los términos y firmar digitalmente.',
@@ -241,6 +244,9 @@ const CONTRACT_COPY = {
       redirectNote: 'You will be redirected to Stripe to complete the payment securely.',
       unavailableTitle: 'Payment link not available',
       unavailableNote: 'Please contact the agent to complete payment.',
+      generateLink: 'Generate payment link',
+      generating: 'Generating link...',
+      generateError: 'Could not generate the payment link.',
       direct: 'Direct payment',
       requiredWarning: '⚠️ You must complete payment before you can sign the contract',
       requiredNote: 'Once payment is complete, you will be able to accept terms and sign digitally.',
@@ -386,6 +392,8 @@ export default function ContractPage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [paymentSyncAttempted, setPaymentSyncAttempted] = useState(false);
+  const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
+  const [paymentLinkError, setPaymentLinkError] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -456,6 +464,35 @@ export default function ContractPage() {
 
     fetchBooking();
   }, [id, token, paymentStatus]);
+
+  const handleGeneratePaymentLink = async () => {
+    if (!booking || creatingPaymentLink) return;
+    setCreatingPaymentLink(true);
+    setPaymentLinkError(null);
+
+    try {
+      const response = await fetch('/api/stripe/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId: booking.id, token }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || copy.payment.generateError);
+      }
+
+      if (!data?.url) {
+        throw new Error(copy.payment.generateError);
+      }
+
+      setBooking((prev) => (prev ? { ...prev, stripe_payment_link: data.url } : prev));
+    } catch (err: any) {
+      setPaymentLinkError(err?.message || copy.payment.generateError);
+    } finally {
+      setCreatingPaymentLink(false);
+    }
+  };
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -950,6 +987,19 @@ export default function ContractPage() {
               <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4 text-center">
                 <div className="text-yellow-700 font-medium">{copy.payment.unavailableTitle}</div>
                 <div className="text-sm text-yellow-600 mt-1">{copy.payment.unavailableNote}</div>
+                {!booking.expirado && booking.estado !== 'expirada' && (
+                  <button
+                    type="button"
+                    onClick={handleGeneratePaymentLink}
+                    disabled={creatingPaymentLink}
+                    className="btn-primary w-full mt-4 py-3 disabled:opacity-70 disabled:cursor-not-allowed"
+                  >
+                    {creatingPaymentLink ? copy.payment.generating : copy.payment.generateLink}
+                  </button>
+                )}
+                {paymentLinkError && (
+                  <div className="text-xs text-red-600 mt-2">{paymentLinkError}</div>
+                )}
               </div>
             )}
           </section>
