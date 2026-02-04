@@ -987,7 +987,7 @@ export default function ContractPage() {
               <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4 text-center">
                 <div className="text-yellow-700 font-medium">{copy.payment.unavailableTitle}</div>
                 <div className="text-sm text-yellow-600 mt-1">{copy.payment.unavailableNote}</div>
-                {!booking.expirado && booking.estado !== 'expirada' && (
+                {!booking.expirado && (
                   <button
                     type="button"
                     onClick={handleGeneratePaymentLink}
