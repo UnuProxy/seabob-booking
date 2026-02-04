@@ -15,7 +15,6 @@ import {
   AlertCircle,
   Wallet,
   Building2,
-  Banknote,
   MoreHorizontal,
 } from 'lucide-react';
 import clsx from 'clsx';
@@ -27,22 +26,33 @@ interface PaymentRefundManagerProps {
 }
 
 export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefundManagerProps) {
+  const getDateValue = (value: any): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (value?.toDate) return value.toDate();
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
   const [loading, setLoading] = useState(false);
+  const [depositLoading, setDepositLoading] = useState(false);
+  const [refundOpen, setRefundOpen] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
   // Payment form
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('transferencia');
   const [paymentReference, setPaymentReference] = useState('');
   
   // Refund form
-  const [refundAmount, setRefundAmount] = useState(booking.precio_total.toString());
-  const [refundMethod, setRefundMethod] = useState<PaymentMethod>('efectivo');
+  const rentalTotal = booking.precio_total || 0;
+  const depositTotal = booking.deposito_total || 0;
+  const maxRefundable = rentalTotal;
+  const [refundAmount, setRefundAmount] = useState(maxRefundable.toString());
+  const [refundMethod, setRefundMethod] = useState<PaymentMethod>('transferencia');
   const [refundReason, setRefundReason] = useState('');
   const [refundReference, setRefundReference] = useState('');
 
   const paymentMethods: { value: PaymentMethod; label: string; icon: any }[] = [
-    { value: 'efectivo', label: 'Efectivo', icon: Banknote },
     { value: 'transferencia', label: 'Transferencia Bancaria', icon: Building2 },
     { value: 'tarjeta', label: 'Tarjeta (Manual)', icon: CreditCard },
     { value: 'stripe', label: 'Stripe', icon: Wallet },
@@ -122,7 +132,7 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
 
   const handleProcessRefund = async () => {
     const amount = parseFloat(refundAmount);
-    if (isNaN(amount) || amount <= 0 || amount > booking.precio_total) {
+    if (isNaN(amount) || amount <= 0 || amount > maxRefundable) {
       setError('Monto de reembolso inválido');
       return;
     }
@@ -197,6 +207,51 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
     }
   };
 
+  const handleDepositRefund = async () => {
+    if (!depositTotal || depositLoading) return;
+    if (!booking.pago_realizado) {
+      setError('El pago debe estar marcado como realizado para reembolsar el depósito.');
+      return;
+    }
+    if (booking.deposito_reembolsado) {
+      setError('El depósito ya fue reembolsado.');
+      return;
+    }
+
+    setDepositLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      if (booking.pago_metodo === 'stripe') {
+        const response = await fetch('/api/stripe/refund-deposit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookingId: booking.id }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.error || 'No se pudo reembolsar el depósito en Stripe');
+        }
+      } else {
+        await updateDoc(doc(db, 'bookings', booking.id), {
+          deposito_reembolsado: true,
+          deposito_reembolsado_en: serverTimestamp(),
+          updated_at: serverTimestamp(),
+        });
+      }
+
+      setSuccess('✅ Depósito reembolsado correctamente');
+      onUpdate?.();
+    } catch (err: any) {
+      console.error('Deposit refund error:', err);
+      setError(`Error: ${err.message || 'No se pudo reembolsar el depósito.'}`);
+    } finally {
+      setDepositLoading(false);
+    }
+  };
+
   const isPaid = booking.pago_realizado;
   const isRefunded = booking.reembolso_realizado;
 
@@ -230,8 +285,18 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
                 <p className="font-medium text-slate-900">{booking.cliente.nombre}</p>
               </div>
               <div>
-                <span className="text-slate-500">Total:</span>
-                <p className="font-bold text-slate-900 text-lg">€{booking.precio_total.toFixed(2)}</p>
+                <span className="text-slate-500">Alquiler:</span>
+                <p className="font-bold text-slate-900 text-lg">€{rentalTotal.toFixed(2)}</p>
+                {depositTotal > 0 && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Depósito: €{depositTotal.toFixed(2)}
+                  </p>
+                )}
+                {depositTotal > 0 && (
+                  <p className="text-xs text-slate-500">
+                    Total cobrado: €{(rentalTotal + depositTotal).toFixed(2)}
+                  </p>
+                )}
               </div>
               <div>
                 <span className="text-slate-500">Estado Pago:</span>
@@ -252,6 +317,17 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
                   {isRefunded ? 'Sí' : 'No'}
                 </p>
               </div>
+              {depositTotal > 0 && (
+                <div>
+                  <span className="text-slate-500">Depósito:</span>
+                  <p className={clsx(
+                    "inline-flex items-center gap-1 px-2 py-1 rounded-lg font-medium",
+                    booking.deposito_reembolsado ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                  )}>
+                    {booking.deposito_reembolsado ? 'Reembolsado' : 'Pendiente'}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -342,7 +418,7 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
                 <CheckCircle className="text-green-600" size={24} />
                 <h3 className="text-lg font-bold text-green-900">Pago Confirmado</h3>
               </div>
-              <div className="space-y-2 text-sm">
+              <div className="space-y-2 text-sm text-green-900">
                 {booking.pago_metodo && (
                   <p><span className="font-semibold">Método:</span> {booking.pago_metodo}</p>
                 )}
@@ -353,15 +429,66 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
             </div>
           )}
 
+          {depositTotal > 0 && (
+            <div className="border border-blue-200 bg-blue-50 rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Wallet className="text-blue-600" size={24} />
+                <h3 className="text-lg font-bold text-blue-900">Depósito reembolsable</h3>
+              </div>
+              <div className="space-y-2 text-sm text-blue-900">
+                <p><span className="font-semibold">Monto:</span> €{depositTotal.toFixed(2)}</p>
+                <p>
+                  <span className="font-semibold">Estado:</span>{' '}
+                  {booking.deposito_reembolsado ? 'Reembolsado' : 'Pendiente'}
+                </p>
+                {booking.deposito_reembolsado_en && (
+                  <p>
+                    <span className="font-semibold">Reembolsado el:</span>{' '}
+                    {getDateValue(booking.deposito_reembolsado_en)?.toLocaleDateString('es-ES') || '-'}
+                  </p>
+                )}
+              </div>
+              {!booking.deposito_reembolsado && (
+                <button
+                  onClick={handleDepositRefund}
+                  disabled={depositLoading}
+                  className={clsx(
+                    'mt-4 w-full py-2.5 rounded-lg font-bold text-white transition-all flex items-center justify-center gap-2',
+                    depositLoading
+                      ? 'bg-slate-400 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-600/30'
+                  )}
+                >
+                  <RefreshCcw size={18} />
+                  {depositLoading ? 'Procesando...' : 'Reembolsar depósito'}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Refund Section */}
           {isPaid && !isRefunded && (
             <div className="border border-orange-200 bg-orange-50 rounded-xl p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <RefreshCcw className="text-orange-600" size={24} />
-                <h3 className="text-lg font-bold text-orange-900">Procesar Reembolso</h3>
-              </div>
+              <button
+                type="button"
+                onClick={() => setRefundOpen((prev) => !prev)}
+                className="w-full flex items-center justify-between text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <RefreshCcw className="text-orange-600" size={24} />
+                  <h3 className="text-lg font-bold text-orange-900">Procesar Reembolso</h3>
+                </div>
+                <span className="text-xs font-semibold text-orange-700">
+                  {refundOpen ? 'Ocultar' : 'Abrir'}
+                </span>
+              </button>
 
-              <div className="space-y-4">
+              <p className="text-xs text-orange-700 mt-2">
+                Esta sección sirve para reembolsar el importe del alquiler (sin depósito). El depósito se gestiona arriba.
+              </p>
+
+              {refundOpen && (
+                <div className="space-y-4 mt-4">
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-2">
                     Monto a Reembolsar *
@@ -372,13 +499,13 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
                       type="number"
                       step="0.01"
                       min="0"
-                      max={booking.precio_total}
+                      max={maxRefundable}
                       value={refundAmount}
                       onChange={(e) => setRefundAmount(e.target.value)}
                       className="w-full pl-8 pr-4 py-2.5 rounded-lg border border-slate-200 focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none font-semibold"
                     />
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">Máximo: €{booking.precio_total.toFixed(2)}</p>
+                  <p className="text-xs text-slate-500 mt-1">Máximo: €{maxRefundable.toFixed(2)}</p>
                 </div>
 
                 <div>
@@ -448,6 +575,7 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
                   {loading ? 'Procesando...' : 'Procesar Reembolso'}
                 </button>
               </div>
+              )}
             </div>
           )}
 

@@ -102,6 +102,9 @@ export default function ProductsPage() {
                   {product.precio_hora && product.precio_hora > 0 && (
                     <div className="text-gray-500">€{product.precio_hora} / hora</div>
                   )}
+                  {product.deposito && product.deposito > 0 && (
+                    <div className="text-gray-500">Depósito: €{product.deposito}</div>
+                  )}
                 </div>
                 
                 <div className="flex gap-2">

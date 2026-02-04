@@ -18,6 +18,8 @@ export function LoginForm() {
 
     if (user.rol === 'admin' || user.rol === 'colaborador') {
       router.push('/admin/dashboard');
+    } else if (user.rol === 'delivery') {
+      router.push('/delivery/dashboard');
     } else if (user.rol === 'broker' || user.rol === 'agency') {
       router.push('/broker/dashboard');
     } else {

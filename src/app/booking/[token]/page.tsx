@@ -55,9 +55,12 @@ export default function PublicBookingPage() {
   const [clientPhone, setClientPhone] = useState('');
   const [notes, setNotes] = useState('');
 
-  const todayStr = format(new Date(), 'yyyy-MM-dd');
-  const [startDate, setStartDate] = useState(todayStr);
-  const [endDate, setEndDate] = useState(todayStr);
+  const now = new Date();
+  const isPastCutoff = now.getHours() >= 17;
+  const minDate = isPastCutoff ? addDays(now, 1) : now;
+  const minDateStr = format(minDate, 'yyyy-MM-dd');
+  const [startDate, setStartDate] = useState(minDateStr);
+  const [endDate, setEndDate] = useState(minDateStr);
 
   const [deliveryLocation, setDeliveryLocation] = useState<
     'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro'
@@ -181,13 +184,24 @@ export default function PublicBookingPage() {
       }));
   }, [quantities, dayCount]);
 
-  const total = useMemo(() => {
+  const rentalTotal = useMemo(() => {
     return items.reduce((acc, item) => {
       const product = products.find((p) => p.id === item.producto_id);
       if (!product) return acc;
       return acc + product.precio_diario * dayCount * item.cantidad;
     }, 0);
   }, [items, products, dayCount]);
+
+  const depositTotal = useMemo(() => {
+    return items.reduce((acc, item) => {
+      const product = products.find((p) => p.id === item.producto_id);
+      if (!product) return acc;
+      const deposit = product.deposito || 0;
+      return acc + deposit * item.cantidad;
+    }, 0);
+  }, [items, products]);
+
+  const total = rentalTotal + depositTotal;
 
   const updateQuantity = (productId: string, delta: number) => {
     setQuantities((prev) => {
@@ -246,6 +260,10 @@ export default function PublicBookingPage() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!link) return;
+    if (startDate < minDateStr) {
+      setError('No se pueden crear reservas para hoy después de las 17:00. Selecciona otra fecha.');
+      return;
+    }
 
     if (!clientName.trim() || !clientEmail.trim()) {
       setError('El nombre y el email son obligatorios.');
@@ -286,6 +304,7 @@ export default function PublicBookingPage() {
               ? product?.precio_hora || 0
               : product?.precio_diario || 0,
           comision_percent: product?.comision || 0,
+          deposito_unitario: product?.deposito || 0,
         };
       });
 
@@ -310,21 +329,8 @@ export default function PublicBookingPage() {
           }, 0)
         : 0;
 
-      // Calculate reservation expiration time (hold period)
-      const fechaInicio = new Date(startDate);
-      const ahora = new Date();
-      const diasHastaInicio = Math.floor((fechaInicio.getTime() - ahora.getTime()) / (1000 * 60 * 60 * 24));
-      
-      let tiempoExpiracion: number; // in milliseconds
-      if (diasHastaInicio >= 7) {
-        // 7+ days away: 24 hours to pay/sign
-        tiempoExpiracion = 24 * 60 * 60 * 1000; // 24 hours
-      } else {
-        // Less than 7 days: 1 hour to pay/sign
-        tiempoExpiracion = 1 * 60 * 60 * 1000; // 1 hour
-      }
-      
-      const expiracion = new Date(ahora.getTime() + tiempoExpiracion);
+      // Calculate reservation expiration time (hold period) - 30 minutes
+      const expiracion = new Date(Date.now() + 30 * 60 * 1000);
 
       const bookingData = {
         numero_reserva: ref,
@@ -337,7 +343,9 @@ export default function PublicBookingPage() {
         items: itemsWithNames,
         fecha_inicio: startDate,
         fecha_fin: endDate,
-        precio_total: total,
+        precio_total: rentalTotal,
+        deposito_total: depositTotal,
+        ...(depositTotal > 0 ? { deposito_reembolsado: false } : {}),
         estado: 'pendiente',
         acuerdo_firmado: false,
         ubicacion_entrega: deliveryLocation,
@@ -652,10 +660,10 @@ export default function PublicBookingPage() {
                   <input
                     type="date"
                     value={startDate}
-                    min={todayStr}
+                    min={minDateStr}
                     onChange={(e) => {
-                      const nextDate = e.target.value || todayStr;
-                      const safeDate = nextDate < todayStr ? todayStr : nextDate;
+                      const nextDate = e.target.value || minDateStr;
+                      const safeDate = nextDate < minDateStr ? minDateStr : nextDate;
                       setStartDate(safeDate);
                       setEndDate(safeDate);
                     }}
@@ -670,7 +678,7 @@ export default function PublicBookingPage() {
                   <input
                     type="date"
                     value={endDate}
-                    min={startDate < todayStr ? todayStr : startDate}
+                    min={startDate < minDateStr ? minDateStr : startDate}
                     onChange={(e) => {
                       const nextDate = e.target.value || startDate;
                       setEndDate(nextDate < startDate ? startDate : nextDate);
@@ -685,6 +693,11 @@ export default function PublicBookingPage() {
                 <CalendarDays size={16} />
                 Duración: {dayCount} {dayCount === 1 ? 'día' : 'días'}
               </div>
+              {isPastCutoff && (
+                <div className="mt-2 inline-flex items-center gap-2 bg-amber-50 text-amber-700 px-4 py-2 rounded-full text-xs font-semibold">
+                  Después de las 17:00 no se permiten reservas para hoy.
+                </div>
+              )}
             </section>
 
             <section className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 md:p-8">
@@ -890,6 +903,12 @@ export default function PublicBookingPage() {
                 <p className="text-sm text-slate-500">Total estimado</p>
                 <div className="text-3xl font-bold text-slate-900">
                   €{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                </div>
+                <div className="text-xs text-slate-500 mt-2 space-y-1">
+                  <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
+                  {depositTotal > 0 && (
+                    <div>Depósito reembolsable: €{depositTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
+                  )}
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
                   Precio sujeto a disponibilidad y confirmación final.

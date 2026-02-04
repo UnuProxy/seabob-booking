@@ -478,10 +478,6 @@ export default function BrokerReservasPage() {
       {isModalOpen && (
         <BookingForm
           onClose={() => setIsModalOpen(false)}
-          onSuccess={() => {
-            setIsModalOpen(false);
-            // Refresh will happen automatically via real-time listener
-          }}
         />
       )}
 

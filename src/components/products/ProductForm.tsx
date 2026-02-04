@@ -18,6 +18,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
     nombre: '',
     descripcion: '',
     precio_diario: undefined,
+    deposito: undefined,
     comision: undefined,
     tipo: 'seabob',
     imagen_url: '',
@@ -33,6 +34,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
       const productData = {
         ...formData,
         precio_diario: Number(formData.precio_diario) || 0,
+        deposito: Number(formData.deposito) || 0,
         comision: Number(formData.comision) || 0,
         creado_por: auth.currentUser?.uid,
         updated_at: serverTimestamp(),
@@ -136,6 +138,22 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
                 placeholder="0"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Depósito reembolsable (€)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.deposito ?? ''}
+                onChange={(e) => setFormData({ ...formData, deposito: e.target.value === '' ? undefined : Number(e.target.value) })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                placeholder="0"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Se cobra como fianza y se reembolsa si la devolución es correcta.
+              </p>
             </div>
 
             <div>
