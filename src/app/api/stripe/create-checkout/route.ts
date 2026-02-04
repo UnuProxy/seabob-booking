@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
+import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebase/admin';
 import type { Booking } from '@/types';
 
@@ -113,6 +114,14 @@ export async function POST(request: NextRequest) {
       // Enable automatic tax calculation if configured
       // automatic_tax: { enabled: true },
     });
+
+    if (session.url) {
+      await bookingRef.update({
+        stripe_checkout_session_id: session.id,
+        stripe_payment_link: session.url,
+        updated_at: FieldValue.serverTimestamp(),
+      });
+    }
 
     return NextResponse.json({
       sessionId: session.id,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, getDocs, query, where, serverTimestamp, doc, updateDoc, getDoc, increment, runTransaction } from 'firebase/firestore';
+import { collection, getDocs, query, where, serverTimestamp, doc, getDoc, increment, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Product, BookingItem, RentalType, DailyStock, User as AppUser } from '@/types';
 import { useAuthStore } from '@/store/authStore';
@@ -416,15 +416,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
           });
 
           if (response.ok) {
-            const { url, sessionId } = await response.json();
-            
-            // Update booking with payment link (only if we got valid values)
-            if (url && sessionId) {
-              await updateDoc(doc(db, 'bookings', bookingId), {
-                stripe_checkout_session_id: sessionId,
-                stripe_payment_link: url,
-              });
-            }
+            await response.json();
           } else {
             console.error('Failed to create payment link');
             // Continue anyway - booking is created, payment link can be generated later
