@@ -47,7 +47,10 @@
    - Import from GitHub
 
 2. **Configure Environment Variables:**
-   In Vercel Dashboard → Project Settings → Environment Variables, add all variables from `.env.example`
+   In Vercel Dashboard → Project Settings → Environment Variables, add all variables from `.env.example`.
+   For server-side Firebase Admin access, you must set either:
+   - `FIREBASE_SERVICE_ACCOUNT` (single-line JSON), or
+   - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`
 
 3. **Deploy:**
    - Click "Deploy"
