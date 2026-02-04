@@ -55,7 +55,17 @@ export async function POST(request: NextRequest) {
 
     const resolvedEmail = booking.cliente?.email;
     const resolvedName = booking.cliente?.nombre;
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const appUrl =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      request.headers.get('origin') ||
+      (() => {
+        const host =
+          request.headers.get('x-forwarded-host') || request.headers.get('host');
+        if (!host) return null;
+        const proto = request.headers.get('x-forwarded-proto') || 'https';
+        return `${proto}://${host}`;
+      })() ||
+      'http://localhost:3000';
     const bookingToken = booking.token_acceso || token || '';
     const tokenParam = bookingToken ? `?t=${encodeURIComponent(bookingToken)}` : '';
     const paymentParam = bookingToken ? '&' : '?';
