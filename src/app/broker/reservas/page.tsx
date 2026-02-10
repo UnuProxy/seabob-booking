@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
@@ -21,7 +21,6 @@ import {
   Share2,
   Euro,
   Loader2,
-  Trash2,
   Ban
 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -197,26 +196,6 @@ export default function BrokerReservasPage() {
     }
   };
 
-  const handleDeleteBooking = async (booking: Booking) => {
-    if (!confirm(`⚠️ ¿Estás ABSOLUTAMENTE seguro de que deseas ELIMINAR permanentemente la reserva ${booking.numero_reserva}?\n\n✗ Esta acción NO se puede deshacer\n✗ Se perderá todo el historial\n✗ No se puede recuperar\n\n¿Continuar?`)) {
-      return;
-    }
-
-    // Double confirmation for safety
-    if (!confirm(`ÚLTIMA CONFIRMACIÓN:\n\nEliminar reserva ${booking.numero_reserva} de ${booking.cliente.nombre}\nTotal: €${booking.precio_total}\n\n¿Eliminar definitivamente?`)) {
-      return;
-    }
-
-    try {
-      await releaseBookingStockOnce(booking.id, user?.id || 'broker_panel');
-      await deleteDoc(doc(db, 'bookings', booking.id));
-      alert('Reserva eliminada permanentemente');
-    } catch (error) {
-      console.error('Error deleting booking:', error);
-      alert('Error al eliminar la reserva');
-    }
-  };
-
   const filteredBookings = bookings.filter(booking => {
     const bookingStart = getDate(booking.fecha_inicio);
     const bookingEnd = getDate(booking.fecha_fin);
@@ -288,7 +267,7 @@ export default function BrokerReservasPage() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
         <div className="flex flex-col lg:flex-row gap-4">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
+            <Search className="pointer-events-none absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
             <input
               type="text"
               placeholder="Buscar por cliente, email o número de reserva..."
@@ -451,13 +430,6 @@ export default function BrokerReservasPage() {
                           <Ban size={18} />
                         </button>
                       )}
-                      <button
-                        onClick={() => handleDeleteBooking(booking)}
-                        className="btn-icon text-slate-600 hover:bg-red-50 hover:text-red-600"
-                        title="Eliminar reserva"
-                      >
-                        <Trash2 size={18} />
-                      </button>
                     </div>
                   </td>
                 </tr>

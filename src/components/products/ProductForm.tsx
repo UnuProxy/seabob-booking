@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import { Product, ProductType } from '@/types';
 import { addDoc, collection, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db, auth } from '@/lib/firebase/config';
-import { X } from 'lucide-react';
+import { db, auth, storage } from '@/lib/firebase/config';
+import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
+import { ImageUp, X } from 'lucide-react';
 
 interface ProductFormProps {
   onClose: () => void;
@@ -14,6 +15,7 @@ interface ProductFormProps {
 
 export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormProps) {
   const [loading, setLoading] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [formData, setFormData] = useState<Partial<Product>>({
     nombre: '',
     descripcion: '',
@@ -31,7 +33,11 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
     setLoading(true);
 
     try {
-      const productData = {
+      if (!productToEdit?.id && !imageFile) {
+        throw new Error('Por favor, sube una imagen.');
+      }
+
+      const productData: Record<string, unknown> = {
         ...formData,
         precio_diario: Number(formData.precio_diario) || 0,
         deposito: Number(formData.deposito) || 0,
@@ -40,20 +46,55 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
         updated_at: serverTimestamp(),
       };
 
+      let productId = productToEdit?.id || '';
+
       if (productToEdit?.id) {
         await updateDoc(doc(db, 'products', productToEdit.id), productData);
       } else {
-        await addDoc(collection(db, 'products'), {
+        const created = await addDoc(collection(db, 'products'), {
           ...productData,
           creado_en: serverTimestamp(),
         });
+        productId = created.id;
+      }
+
+      if (imageFile && productId) {
+        if (!imageFile.type.startsWith('image/')) {
+          throw new Error('El archivo debe ser una imagen.');
+        }
+        if (imageFile.size > 6 * 1024 * 1024) {
+          throw new Error('La imagen es demasiado grande (máx. 6MB).');
+        }
+
+        const safeName = imageFile.name
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9._-]+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '');
+
+        const path = `products/${productId}/${Date.now()}-${safeName || 'image'}`;
+        const fileRef = storageRef(storage, path);
+        await uploadBytes(fileRef, imageFile, { contentType: imageFile.type });
+        const url = await getDownloadURL(fileRef);
+
+        await updateDoc(doc(db, 'products', productId), {
+          imagen_url: url,
+          updated_at: serverTimestamp(),
+        });
+      } else if (productToEdit?.id) {
+        // If editing and no file selected, keep existing imagen_url as-is.
       }
 
       onSuccess();
       onClose();
     } catch (error) {
       console.error('Error saving product:', error);
-      alert('Error al guardar el producto');
+      const message =
+        typeof error === 'object' && error && 'message' in error
+          ? String((error as { message?: unknown }).message || '')
+          : '';
+      alert(message || 'Error al guardar el producto');
     } finally {
       setLoading(false);
     }
@@ -66,9 +107,9 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
     : '0.00';
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200 flex justify-between items-center">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-white w-full h-[100svh] sm:h-auto sm:max-h-[90vh] sm:max-w-2xl rounded-none sm:rounded-lg flex flex-col">
+        <div className="sticky top-0 z-10 bg-white p-4 sm:p-6 border-b border-gray-200 flex justify-between items-center">
           <h2 className="text-xl font-bold text-gray-800">
             {productToEdit ? 'Editar Producto' : 'Nuevo Producto'}
           </h2>
@@ -77,9 +118,9 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="col-span-2">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Producto</label>
               <input
                 type="text"
@@ -91,7 +132,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
               />
             </div>
 
-            <div className="col-span-2">
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
               <textarea
                 rows={3}
@@ -180,33 +221,67 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
               )}
             </div>
 
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">URL Imagen</label>
-              <input
-                type="url"
-                value={formData.imagen_url}
-                onChange={(e) => setFormData({ ...formData, imagen_url: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
-                placeholder="https://..."
-              />
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Imagen</label>
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                      <ImageUp size={18} className="text-slate-600" />
+                      Subir imagen
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      JPG/PNG/WebP. Máx. 6MB.
+                    </p>
+                  </div>
+                  {imageFile && (
+                    <button
+                      type="button"
+                      onClick={() => setImageFile(null)}
+                      className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-white"
+                      title="Quitar imagen seleccionada"
+                    >
+                      <X size={18} />
+                    </button>
+                  )}
+                </div>
+
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null;
+                    setImageFile(file);
+                  }}
+                  className="mt-3 block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-slate-800"
+                />
+
+                {productToEdit?.imagen_url && !imageFile && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    Este producto ya tiene una imagen guardada. Sube otra para reemplazarla.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+          <div className="sticky bottom-0 -mx-4 sm:mx-0 mt-2 bg-white border-t border-gray-200 px-4 sm:px-0 pt-4 pb-4 sm:pb-0">
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3">
             <button
               type="button"
               onClick={onClose}
-              className="btn-outline"
+              className="btn-outline w-full sm:w-auto"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="btn-primary disabled:opacity-50"
+              className="btn-primary disabled:opacity-50 w-full sm:w-auto"
             >
               {loading ? 'Guardando...' : 'Guardar Producto'}
             </button>
+          </div>
           </div>
         </form>
       </div>

@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import {
   CreditCard,
   Euro,
-  Landmark,
   Receipt,
   TrendingUp,
   UserRound,
@@ -181,22 +180,10 @@ export default function FinanzasPage() {
       tone: 'border-indigo-100 bg-indigo-50 text-indigo-700',
     },
     {
-      key: 'transferencia',
-      label: 'Transferencia',
-      icon: Landmark,
-      tone: 'border-sky-100 bg-sky-50 text-sky-700',
-    },
-    {
       key: 'tarjeta',
       label: 'Tarjeta manual',
       icon: Euro,
       tone: 'border-amber-100 bg-amber-50 text-amber-700',
-    },
-    {
-      key: 'otro',
-      label: 'Otros',
-      icon: Receipt,
-      tone: 'border-slate-200 bg-slate-50 text-slate-600',
     },
   ] as const;
 
@@ -222,7 +209,7 @@ export default function FinanzasPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <div>
@@ -246,17 +233,17 @@ export default function FinanzasPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
-                Ingresos brutos
+                Ingresos
               </p>
-              <p className="text-2xl font-bold text-blue-700 mt-2">
-                {formatCurrency(finance.grossPaid)}
+              <p className="text-2xl font-bold text-emerald-600 mt-2">
+                {formatCurrency(finance.netRevenue)}
               </p>
             </div>
-            <div className="h-11 w-11 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center">
+            <div className="h-11 w-11 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
               <TrendingUp size={20} />
             </div>
           </div>
-          <p className="text-xs text-slate-500 mt-3">Pagos confirmados</p>
+          <p className="text-xs text-slate-500 mt-3">Confirmados menos reembolsos</p>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
@@ -274,23 +261,6 @@ export default function FinanzasPage() {
             </div>
           </div>
           <p className="text-xs text-slate-500 mt-3">Pagos devueltos</p>
-        </div>
-
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
-                Ingresos netos
-              </p>
-              <p className="text-2xl font-bold text-emerald-600 mt-2">
-                {formatCurrency(finance.netRevenue)}
-              </p>
-            </div>
-            <div className="h-11 w-11 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
-              <TrendingUp size={20} />
-            </div>
-          </div>
-          <p className="text-xs text-slate-500 mt-3">Brutos menos reembolsos</p>
         </div>
 
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">

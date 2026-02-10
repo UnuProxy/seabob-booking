@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
-import { format, subDays, parseISO } from 'date-fns';
 import { getAdminDb } from '@/lib/firebase/admin';
 import type { Booking } from '@/types';
 
@@ -29,11 +28,28 @@ const isAuthorizedRequest = (request: NextRequest) => {
   return isVercelCron;
 };
 
-const isRefundReady = (booking: Booking, cutoffDate: string) => {
-  if (!booking.fecha_fin) return false;
-  const endDate = parseISO(booking.fecha_fin);
-  if (Number.isNaN(endDate.getTime())) return false;
-  return booking.fecha_fin <= cutoffDate;
+const getDateValue = (value: unknown): Date | null => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === 'object' && value !== null && 'toDate' in value) {
+    const maybe = value as { toDate?: () => Date };
+    if (typeof maybe.toDate === 'function') return maybe.toDate();
+  }
+  const parsed = new Date(value as string | number);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const isRefundReady = (booking: Booking, now: Date) => {
+  if (booking.deposito_auto_reembolso_pausado) return false;
+  if (booking.deposito_reembolso_estado === 'pending' || booking.stripe_deposito_refund_id) return false;
+
+  const scheduledAt = getDateValue(booking.deposito_auto_reembolso_en);
+  if (scheduledAt) return scheduledAt.getTime() <= now.getTime();
+
+  const paidAt = getDateValue(booking.pago_realizado_en);
+  if (!paidAt) return false;
+  const dueAt = new Date(paidAt.getTime() + 24 * 60 * 60 * 1000);
+  return dueAt.getTime() <= now.getTime();
 };
 
 export async function GET(request: NextRequest) {
@@ -47,7 +63,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const adminDb = getAdminDb();
-    const cutoffDate = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+    const now = new Date();
 
     const snapshot = await adminDb
       .collection('bookings')
@@ -71,15 +87,11 @@ export async function GET(request: NextRequest) {
         skipped += 1;
         continue;
       }
-      if (booking.reembolso_realizado) {
-        skipped += 1;
-        continue;
-      }
       if (!booking.stripe_payment_intent_id) {
         skipped += 1;
         continue;
       }
-      if (!isRefundReady(booking, cutoffDate)) {
+      if (!isRefundReady(booking, now)) {
         skipped += 1;
         continue;
       }
@@ -91,19 +103,26 @@ export async function GET(request: NextRequest) {
       }
 
       try {
-        const refund = await stripe.refunds.create({
-          payment_intent: booking.stripe_payment_intent_id,
-          amount,
-          reason: 'requested_by_customer',
-          metadata: {
-            booking_id: booking.id,
-            refund_type: 'deposit',
+        const idempotencyKey = `deposit_refund_${booking.id}_${amount}`;
+        const refund = await stripe.refunds.create(
+          {
+            payment_intent: booking.stripe_payment_intent_id,
+            amount,
+            reason: 'requested_by_customer',
+            metadata: {
+              booking_id: booking.id,
+              refund_type: 'deposit',
+            },
           },
-        });
+          { idempotencyKey }
+        );
 
         await adminDb.collection('bookings').doc(booking.id).update({
-          deposito_reembolsado: true,
-          deposito_reembolsado_en: FieldValue.serverTimestamp(),
+          deposito_reembolsado: refund.status === 'succeeded',
+          deposito_reembolsado_en: refund.status === 'succeeded' ? FieldValue.serverTimestamp() : null,
+          deposito_reembolso_iniciado_en: FieldValue.serverTimestamp(),
+          deposito_reembolso_estado: refund.status || 'unknown',
+          deposito_reembolso_error: (refund as unknown as { failure_reason?: string }).failure_reason || null,
           stripe_deposito_refund_id: refund.id,
           updated_at: FieldValue.serverTimestamp(),
         });
@@ -119,7 +138,6 @@ export async function GET(request: NextRequest) {
       checked,
       refunded,
       skipped,
-      cutoffDate,
     });
   } catch (error) {
     console.error('Cron refund error:', error);

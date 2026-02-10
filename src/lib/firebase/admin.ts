@@ -1,7 +1,9 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth, Auth } from 'firebase-admin/auth';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 
 let cachedDb: Firestore | null = null;
+let cachedAuth: Auth | null = null;
 
 function initAdminApp() {
   const projectIdEnv =
@@ -58,4 +60,11 @@ export function getAdminDb() {
     cachedDb = getFirestore(initAdminApp());
   }
   return cachedDb;
+}
+
+export function getAdminAuth() {
+  if (!cachedAuth) {
+    cachedAuth = getAuth(initAdminApp());
+  }
+  return cachedAuth;
 }

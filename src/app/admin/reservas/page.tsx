@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, deleteDoc, doc, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
@@ -18,7 +18,6 @@ import {
   Clock, 
   XCircle, 
   FileCheck,
-  Trash2,
   Eye,
   Share2,
   PenTool,
@@ -180,26 +179,6 @@ export default function BookingsPage() {
     }
   };
 
-  const handleDelete = async (id: string, booking: Booking) => {
-    if (!confirm(`⚠️ ¿Estás ABSOLUTAMENTE seguro de que deseas ELIMINAR permanentemente la reserva ${booking.numero_reserva}?\n\n✗ Esta acción NO se puede deshacer\n✗ Se perderá todo el historial\n✗ No se puede recuperar\n\n¿Continuar?`)) {
-      return;
-    }
-
-    // Double confirmation for safety
-    if (!confirm(`ÚLTIMA CONFIRMACIÓN:\n\nEliminar reserva ${booking.numero_reserva} de ${booking.cliente.nombre}\nTotal: €${booking.precio_total}\n\n¿Eliminar definitivamente?`)) {
-      return;
-    }
-
-    try {
-      await releaseBookingStockOnce(booking.id, user?.id || 'admin_panel');
-      await deleteDoc(doc(db, 'bookings', id));
-      alert('Reserva eliminada permanentemente');
-    } catch (error) {
-      console.error('Error deleting booking:', error);
-      alert('Error al eliminar la reserva');
-    }
-  };
-
   // Auto-expire bookings that exceeded their hold window
   useEffect(() => {
     if (!bookings.length) return;
@@ -254,6 +233,47 @@ export default function BookingsPage() {
       .join(', ');
   };
 
+  const getAgentName = (booking: Booking): string => {
+    if (booking.broker_id && users[booking.broker_id]) {
+      return users[booking.broker_id].nombre || 'Broker desconocido';
+    }
+    if (booking.agency_id && users[booking.agency_id]) {
+      return users[booking.agency_id].nombre || 'Agencia desconocida';
+    }
+    if (booking.colaborador_id && users[booking.colaborador_id]) {
+      return users[booking.colaborador_id].nombre || 'Colaborador desconocido';
+    }
+    if (booking.creado_por && users[booking.creado_por]) {
+      const creator = users[booking.creado_por];
+      if (creator.rol === 'admin') return 'Admin';
+      return creator.nombre || 'Usuario desconocido';
+    }
+    return 'Directo';
+  };
+
+  const getAgentType = (booking: Booking): string => {
+    if (booking.broker_id) return 'Broker';
+    if (booking.agency_id) return 'Agencia';
+    if (booking.colaborador_id) return 'Colaborador';
+    if (booking.creado_por && users[booking.creado_por]) {
+      return users[booking.creado_por].rol === 'admin' ? 'Admin' : 'Usuario';
+    }
+    return 'Directo';
+  };
+
+  const normalizeSearchValue = (value: unknown): string => {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  };
+
+  const searchTokens = normalizeSearchValue(searchTerm)
+    .split(/\s+/)
+    .filter(Boolean);
+
   const filteredBookings = bookings.filter(booking => {
     const bookingStart = getDate(booking.fecha_inicio);
     const bookingEnd = getDate(booking.fecha_fin);
@@ -263,10 +283,36 @@ export default function BookingsPage() {
     const rangeStart = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null;
     const rangeEnd = dateTo ? new Date(`${dateTo}T23:59:59`) : null;
 
-    const matchesSearch = 
-      booking.cliente.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      booking.numero_reserva.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      booking.cliente.email.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = (() => {
+      if (searchTokens.length === 0) return true;
+
+      const productsText = booking.items
+        ?.map((item) => products[item.producto_id]?.nombre || item.producto_nombre || '')
+        .filter(Boolean)
+        .join(' ');
+
+      const haystack = normalizeSearchValue([
+        booking.numero_reserva,
+        booking.cliente?.nombre,
+        booking.cliente?.email,
+        booking.cliente?.telefono,
+        booking.cliente?.whatsapp,
+        getAgentName(booking),
+        getAgentType(booking),
+        booking.pago_referencia,
+        booking.pago_metodo,
+        booking.reembolso_referencia,
+        booking.nombre_barco,
+        booking.numero_amarre,
+        booking.hora_entrega,
+        getLocationLabel(booking),
+        booking.notas,
+        booking.token_acceso,
+        productsText,
+      ].filter(Boolean).join(' '));
+
+      return searchTokens.every((token) => haystack.includes(token));
+    })();
     
     const matchesStatus = statusFilter === 'all' || booking.estado === statusFilter;
 
@@ -307,36 +353,6 @@ export default function BookingsPage() {
       case 'expirada': return <Clock size={16} />;
       default: return <Clock size={16} />;
     }
-  };
-
-  // Helper to get agent name
-  const getAgentName = (booking: Booking): string => {
-    if (booking.broker_id && users[booking.broker_id]) {
-      return users[booking.broker_id].nombre || 'Broker desconocido';
-    }
-    if (booking.agency_id && users[booking.agency_id]) {
-      return users[booking.agency_id].nombre || 'Agencia desconocida';
-    }
-    if (booking.colaborador_id && users[booking.colaborador_id]) {
-      return users[booking.colaborador_id].nombre || 'Colaborador desconocido';
-    }
-    if (booking.creado_por && users[booking.creado_por]) {
-      const creator = users[booking.creado_por];
-      if (creator.rol === 'admin') return 'Admin';
-      return creator.nombre || 'Usuario desconocido';
-    }
-    return 'Directo';
-  };
-
-  // Helper to get agent type
-  const getAgentType = (booking: Booking): string => {
-    if (booking.broker_id) return 'Broker';
-    if (booking.agency_id) return 'Agencia';
-    if (booking.colaborador_id) return 'Colaborador';
-    if (booking.creado_por && users[booking.creado_por]) {
-      return users[booking.creado_por].rol === 'admin' ? 'Admin' : 'Usuario';
-    }
-    return 'Directo';
   };
 
   if (loading) {
@@ -431,11 +447,11 @@ export default function BookingsPage() {
 
       {/* Filters & Search */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
-        <div className="relative w-full lg:flex-1 lg:max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+        <div className="relative w-full lg:flex-1 lg:min-w-[280px] lg:max-w-md">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
           <input
             type="text"
-            placeholder="Buscar por nombre, referencia o email..."
+            placeholder="Buscar por referencia, cliente, agente, email, teléfono..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50 focus:bg-white transition-all"
@@ -744,13 +760,6 @@ export default function BookingsPage() {
                           Cancelar
                         </button>
                       )}
-                      <button 
-                        onClick={() => handleDelete(booking.id, booking)}
-                        className="btn-ghost text-sm text-rose-600"
-                      >
-                        <Trash2 size={16} />
-                        Eliminar
-                      </button>
                         </div>
                         <button
                           onClick={() =>
@@ -1020,13 +1029,6 @@ export default function BookingsPage() {
                             <Ban size={18} />
                           </button>
                         )}
-                        <button 
-                          onClick={() => handleDelete(booking.id, booking)}
-                          className="btn-icon text-slate-400 hover:text-rose-600 hover:bg-rose-50" 
-                          title="Eliminar reserva"
-                        >
-                          <Trash2 size={18} />
-                        </button>
                       </div>
                     </td>
                   </tr>

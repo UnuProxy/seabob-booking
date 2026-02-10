@@ -6,6 +6,7 @@ import { db } from '@/lib/firebase/config';
 import { Booking, PaymentMethod } from '@/types';
 import { calculateCommissionTotal, calculateCommissionTotalWithProducts } from '@/lib/commission';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
+import { useAuthStore } from '@/store/authStore';
 import {
   CreditCard,
   Euro,
@@ -26,6 +27,7 @@ interface PaymentRefundManagerProps {
 }
 
 export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefundManagerProps) {
+  const { user } = useAuthStore();
   const getDateValue = (value: any): Date | null => {
     if (!value) return null;
     if (value instanceof Date) return value;
@@ -47,6 +49,12 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
   const rentalTotal = booking.precio_total || 0;
   const depositTotal = booking.deposito_total || 0;
   const maxRefundable = rentalTotal;
+  const paidAt = getDateValue(booking.pago_realizado_en);
+  const depositScheduledAt =
+    getDateValue(booking.deposito_auto_reembolso_en) ||
+    (paidAt ? new Date(paidAt.getTime() + 24 * 60 * 60 * 1000) : null);
+  const depositTimeLeftMs = depositScheduledAt ? depositScheduledAt.getTime() - Date.now() : null;
+  const depositReady = typeof depositTimeLeftMs === 'number' ? depositTimeLeftMs <= 0 : false;
   const [refundAmount, setRefundAmount] = useState(maxRefundable.toString());
   const [refundMethod, setRefundMethod] = useState<PaymentMethod>('transferencia');
   const [refundReason, setRefundReason] = useState('');
@@ -82,6 +90,10 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
 
       if (booking.estado === 'pendiente') {
         updates.confirmado_en = serverTimestamp();
+      }
+
+      if ((booking.deposito_total || 0) > 0 && paymentMethod === 'stripe' && !booking.deposito_auto_reembolso_en) {
+        updates.deposito_auto_reembolso_en = new Date(Date.now() + 24 * 60 * 60 * 1000);
       }
 
       const hasPartner = Boolean(booking.broker_id || booking.agency_id);
@@ -234,19 +246,50 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
         if (!response.ok) {
           throw new Error(data?.error || 'No se pudo reembolsar el depósito en Stripe');
         }
+
+        const status = data?.status as string | undefined;
+        if (status && status !== 'succeeded') {
+          setSuccess('✅ Reembolso de depósito iniciado en Stripe (procesando)');
+        } else {
+          setSuccess('✅ Depósito reembolsado en Stripe');
+        }
       } else {
         await updateDoc(doc(db, 'bookings', booking.id), {
           deposito_reembolsado: true,
           deposito_reembolsado_en: serverTimestamp(),
           updated_at: serverTimestamp(),
         });
+
+        setSuccess('✅ Depósito marcado como reembolsado (manual)');
       }
 
-      setSuccess('✅ Depósito reembolsado correctamente');
       onUpdate?.();
     } catch (err: any) {
       console.error('Deposit refund error:', err);
       setError(`Error: ${err.message || 'No se pudo reembolsar el depósito.'}`);
+    } finally {
+      setDepositLoading(false);
+    }
+  };
+
+  const handleToggleDepositHold = async () => {
+    if (depositLoading) return;
+    if (!depositTotal) return;
+
+    setDepositLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        deposito_auto_reembolso_pausado: !booking.deposito_auto_reembolso_pausado,
+        deposito_auto_reembolso_pausado_en: serverTimestamp(),
+        deposito_auto_reembolso_pausado_por: user?.id || null,
+        updated_at: serverTimestamp(),
+      });
+      onUpdate?.();
+    } catch (err: any) {
+      console.error('Deposit hold toggle error:', err);
+      setError(`Error: ${err.message || 'No se pudo actualizar el estado del auto-reembolso.'}`);
     } finally {
       setDepositLoading(false);
     }
@@ -322,9 +365,17 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
                   <span className="text-slate-500">Depósito:</span>
                   <p className={clsx(
                     "inline-flex items-center gap-1 px-2 py-1 rounded-lg font-medium",
-                    booking.deposito_reembolsado ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                    booking.deposito_reembolsado
+                      ? "bg-emerald-100 text-emerald-700"
+                      : (booking.deposito_reembolso_estado === 'pending' || booking.stripe_deposito_refund_id)
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-amber-100 text-amber-700"
                   )}>
-                    {booking.deposito_reembolsado ? 'Reembolsado' : 'Pendiente'}
+                    {booking.deposito_reembolsado
+                      ? 'Reembolsado'
+                      : (booking.deposito_reembolso_estado === 'pending' || booking.stripe_deposito_refund_id)
+                        ? 'Procesando'
+                        : 'Pendiente'}
                   </p>
                 </div>
               )}
@@ -439,16 +490,58 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
                 <p><span className="font-semibold">Monto:</span> €{depositTotal.toFixed(2)}</p>
                 <p>
                   <span className="font-semibold">Estado:</span>{' '}
-                  {booking.deposito_reembolsado ? 'Reembolsado' : 'Pendiente'}
+                  {booking.deposito_reembolsado
+                    ? 'Reembolsado'
+                    : booking.deposito_reembolso_estado === 'pending' || booking.stripe_deposito_refund_id
+                      ? 'Procesando'
+                      : 'Pendiente'}
                 </p>
+                {depositScheduledAt && (
+                  <p>
+                    <span className="font-semibold">Auto-reembolso:</span>{' '}
+                    {booking.deposito_auto_reembolso_pausado
+                      ? 'Pausado'
+                      : depositReady
+                        ? 'Listo (24h cumplidas)'
+                        : `Programado: ${depositScheduledAt.toLocaleString('es-ES')}`}
+                  </p>
+                )}
+                {booking.stripe_deposito_refund_id && (
+                  <p className="text-xs text-blue-800/80">
+                    <span className="font-semibold">Referencia Stripe:</span> {booking.stripe_deposito_refund_id}
+                  </p>
+                )}
                 {booking.deposito_reembolsado_en && (
                   <p>
                     <span className="font-semibold">Reembolsado el:</span>{' '}
                     {getDateValue(booking.deposito_reembolsado_en)?.toLocaleDateString('es-ES') || '-'}
                   </p>
                 )}
+                {!booking.deposito_reembolsado && (booking.deposito_reembolso_estado === 'pending' || booking.stripe_deposito_refund_id) && (
+                  <p className="text-xs text-blue-800/80">
+                    El reembolso puede tardar en reflejarse según el banco o la tarjeta del cliente.
+                  </p>
+                )}
               </div>
+
               {!booking.deposito_reembolsado && (
+                <button
+                  onClick={handleToggleDepositHold}
+                  disabled={depositLoading}
+                  className={clsx(
+                    'mt-4 w-full py-2.5 rounded-lg font-bold transition-all flex items-center justify-center gap-2 border',
+                    depositLoading
+                      ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                      : booking.deposito_auto_reembolso_pausado
+                        ? 'bg-white border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  )}
+                >
+                  {booking.deposito_auto_reembolso_pausado ? 'Reanudar auto-reembolso' : 'Pausar auto-reembolso'}
+                </button>
+              )}
+
+              {!booking.deposito_reembolsado && !booking.stripe_deposito_refund_id && booking.deposito_reembolso_estado !== 'pending' && (
                 <button
                   onClick={handleDepositRefund}
                   disabled={depositLoading}
@@ -460,7 +553,7 @@ export function PaymentRefundManager({ booking, onClose, onUpdate }: PaymentRefu
                   )}
                 >
                   <RefreshCcw size={18} />
-                  {depositLoading ? 'Procesando...' : 'Reembolsar depósito'}
+                  {depositLoading ? 'Procesando...' : 'Reembolsar depósito ahora'}
                 </button>
               )}
             </div>
