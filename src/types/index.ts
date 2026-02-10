@@ -22,6 +22,9 @@ export interface User {
   direccion_facturacion?: string;
   nif_cif?: string;
   requires_password_change?: boolean;
+  invite_status?: 'pending' | 'generated';
+  temp_password_last_generated_at?: Date | string;
+  temp_password_last_generated_by?: string;
   comisiones?: {
     broker_commission_percent: number;
     agency_commission_percent: number;
@@ -112,6 +115,14 @@ export interface Booking {
   deposito_total?: number;
   deposito_reembolsado?: boolean;
   deposito_reembolsado_en?: Date | string;
+  deposito_auto_reembolso_en?: Date | string; // When the deposit should be auto-refunded (e.g. +24h)
+  deposito_auto_reembolso_pausado?: boolean; // Admin hold to prevent auto-refund
+  deposito_auto_reembolso_pausado_en?: Date | string;
+  deposito_auto_reembolso_pausado_por?: string;
+  // Stripe refunds can be asynchronous; track lifecycle to avoid showing "refunded" prematurely.
+  deposito_reembolso_estado?: 'pending' | 'succeeded' | 'failed' | 'canceled' | 'unknown' | string;
+  deposito_reembolso_iniciado_en?: Date | string;
+  deposito_reembolso_error?: string;
   stripe_deposito_refund_id?: string;
   
   // Refund tracking

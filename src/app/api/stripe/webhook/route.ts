@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
           break;
         }
 
-        const expectedAmount = Math.round((bookingData.precio_total || 0) * 100);
+        const expectedAmount = Math.round(((bookingData.precio_total || 0) + (bookingData.deposito_total || 0)) * 100);
         if (!Number.isFinite(expectedAmount) || expectedAmount <= 0) {
           console.error(`Invalid booking amount for ${bookingId}`);
           break;
@@ -146,57 +146,92 @@ export async function POST(request: NextRequest) {
         break;
       }
 
+      case 'refund.created':
+      case 'refund.updated': {
+        const refund = event.data.object as Stripe.Refund;
+        const refundType = refund.metadata?.refund_type;
+        const metadataBookingId = refund.metadata?.booking_id;
+
+        let bookingId: string | null = metadataBookingId || null;
+
+        // Fallback if metadata is missing (e.g., manual refunds in Stripe dashboard).
+        if (!bookingId && refund.payment_intent) {
+          const snapshot = await adminDb
+            .collection('bookings')
+            .where('stripe_payment_intent_id', '==', refund.payment_intent.toString())
+            .limit(1)
+            .get();
+          bookingId = snapshot.empty ? null : snapshot.docs[0].id;
+        }
+
+        if (!bookingId) {
+          console.log(`⚠️ Refund ${refund.id} received but no booking matched`);
+          break;
+        }
+
+        const bookingRef = adminDb.collection('bookings').doc(bookingId);
+        const bookingSnap = await bookingRef.get();
+        if (!bookingSnap.exists) break;
+        const existingBooking = bookingSnap.data() as Booking;
+
+        if (refundType === 'deposit') {
+          // Deposit refunds should not cancel a booking.
+          const status = refund.status || 'unknown';
+          await bookingRef.update({
+            stripe_deposito_refund_id: refund.id,
+            deposito_reembolso_estado: status,
+            deposito_reembolso_error: (refund as any).failure_reason || null,
+            deposito_reembolso_iniciado_en: existingBooking.deposito_reembolso_iniciado_en || FieldValue.serverTimestamp(),
+            deposito_reembolsado: status === 'succeeded',
+            deposito_reembolsado_en: status === 'succeeded' ? FieldValue.serverTimestamp() : null,
+            updated_at: FieldValue.serverTimestamp(),
+          });
+          console.log(`✅ Deposit refund updated for booking ${bookingId} (${status})`);
+          break;
+        }
+
+        // Non-deposit refunds: treat as a booking refund.
+        if (existingBooking.reembolso_realizado && existingBooking.stripe_refund_id) {
+          // Avoid overwriting if already recorded.
+          console.log(`ℹ️ Booking ${bookingId} already has a refund recorded - skipping update`);
+          break;
+        }
+
+        const status = refund.status || 'unknown';
+        if (status !== 'succeeded') {
+          console.log(`ℹ️ Refund ${refund.id} for booking ${bookingId} is ${status} - not marking booking refunded yet`);
+          break;
+        }
+
+        await bookingRef.update({
+          reembolso_realizado: true,
+          reembolso_monto: (refund.amount || 0) / 100,
+          reembolso_fecha: FieldValue.serverTimestamp(),
+          reembolso_metodo: 'stripe',
+          reembolso_motivo: refund.reason || 'Reembolso procesado automáticamente por Stripe',
+          reembolso_referencia: refund.id,
+          stripe_refund_id: refund.id,
+          estado: 'cancelada',
+          updated_at: FieldValue.serverTimestamp(),
+        });
+
+        try {
+          await releaseBookingStockOnceAdmin(bookingId, 'stripe_refund_webhook');
+        } catch (releaseError) {
+          console.error('Error releasing stock after refund:', releaseError);
+        }
+
+        console.log(`✅ Booking ${bookingId} marked as refunded via refund.updated`);
+        break;
+      }
+
       case 'charge.refunded': {
         const charge = event.data.object as Stripe.Charge;
         
         console.log(`🔄 Refund processed for payment intent: ${charge.payment_intent}`);
         console.log(`   Refund amount: ${charge.amount_refunded / 100} ${charge.currency.toUpperCase()}`);
-        
-        // Find booking by payment intent ID and auto-update refund
-        if (charge.payment_intent) {
-          try {
-            const snapshot = await adminDb
-              .collection('bookings')
-              .where('stripe_payment_intent_id', '==', charge.payment_intent.toString())
-              .get();
-            
-            if (!snapshot.empty) {
-              const bookingDoc = snapshot.docs[0];
-              const bookingRef = adminDb.collection('bookings').doc(bookingDoc.id);
-              const existingBooking = bookingDoc.data() as Booking;
-
-              if (existingBooking.reembolso_realizado) {
-                console.log(`ℹ️ Booking ${bookingDoc.id} already refunded - skipping update`);
-                break;
-              }
-              
-              await bookingRef.update({
-                reembolso_realizado: true,
-                reembolso_monto: charge.amount_refunded / 100,
-                reembolso_fecha: FieldValue.serverTimestamp(),
-                reembolso_metodo: 'stripe',
-                reembolso_motivo: 'Reembolso procesado automáticamente por Stripe',
-                reembolso_referencia: charge.id,
-                stripe_refund_id: charge.id,
-                estado: 'cancelada',
-                updated_at: FieldValue.serverTimestamp(),
-              });
-              
-              try {
-                await releaseBookingStockOnceAdmin(bookingDoc.id, 'stripe_webhook');
-              } catch (releaseError) {
-                console.error('Error releasing stock after refund:', releaseError);
-              }
-              
-              console.log(`✅ Booking ${bookingDoc.id} auto-updated with refund`);
-            } else {
-              console.log(`⚠️ No booking found with payment_intent: ${charge.payment_intent}`);
-            }
-          } catch (error) {
-            console.error('Error auto-updating refund:', error);
-          }
-        }
-        
+        // Prefer refund.created/refund.updated to classify deposit vs rental refunds via metadata.
+        // We keep this handler for logging only.
         break;
       }
 

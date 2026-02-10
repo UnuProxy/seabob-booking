@@ -81,6 +81,12 @@ export async function POST(request: NextRequest) {
         ? session.payment_intent
         : session.payment_intent?.id;
 
+    const depositTotal = Number(booking.deposito_total || 0);
+    const depositAutoRefundAt =
+      depositTotal > 0 && !booking.deposito_auto_reembolso_en
+        ? new Date(Date.now() + 24 * 60 * 60 * 1000)
+        : undefined;
+
     const hasPartner = Boolean(booking.broker_id || booking.agency_id);
     let computedCommission = hasPartner ? calculateCommissionTotal(booking) : 0;
 
@@ -114,6 +120,7 @@ export async function POST(request: NextRequest) {
       estado: 'confirmada',
       confirmado_en: FieldValue.serverTimestamp(),
       updated_at: FieldValue.serverTimestamp(),
+      ...(depositAutoRefundAt ? { deposito_auto_reembolso_en: depositAutoRefundAt } : {}),
       ...(hasPartner && computedCommission > 0 && !(booking.comision_total && booking.comision_total > 0)
         ? { comision_total: computedCommission, comision_pagada: booking.comision_pagada || 0 }
         : {}),

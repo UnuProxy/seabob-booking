@@ -261,7 +261,7 @@ export default function UsersPage() {
 
         <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
           <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
               type="text"
               placeholder="Buscar por nombre, email o rol..."

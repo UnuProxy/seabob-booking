@@ -81,13 +81,17 @@ export async function POST(request: NextRequest) {
     );
 
     await bookingRef.update({
-      deposito_reembolsado: true,
-      deposito_reembolsado_en: FieldValue.serverTimestamp(),
+      // Don't mark as refunded until Stripe confirms success.
+      deposito_reembolsado: refund.status === 'succeeded',
+      deposito_reembolsado_en: refund.status === 'succeeded' ? FieldValue.serverTimestamp() : null,
+      deposito_reembolso_iniciado_en: FieldValue.serverTimestamp(),
+      deposito_reembolso_estado: refund.status || 'unknown',
+      deposito_reembolso_error: refund.failure_reason || null,
       stripe_deposito_refund_id: refund.id,
       updated_at: FieldValue.serverTimestamp(),
     });
 
-    return NextResponse.json({ refunded: true, refundId: refund.id });
+    return NextResponse.json({ refunded: refund.status === 'succeeded', status: refund.status, refundId: refund.id });
   } catch (error: any) {
     console.error('Stripe deposit refund error:', error);
     return NextResponse.json(
