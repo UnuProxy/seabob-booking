@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { User } from '@/types';
-import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp, updateDoc, deleteDoc } from 'firebase/firestore';
 import { initializeApp, getApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { jsPDF } from 'jspdf';
 import { auth, db } from '@/lib/firebase/config';
-import { UserPlus, Mail, Phone, Building2, Trash2, Loader2, X, Save, AlertCircle, MapPin, Pencil, Lock, Download, Copy, MoreVertical } from 'lucide-react';
+import { UserPlus, Mail, Phone, Building2, Trash2, Loader2, X, Save, AlertCircle, MapPin, Pencil, Lock, Download, Copy } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import clsx from 'clsx';
 
@@ -146,7 +146,7 @@ export default function PartnersPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPartner, setEditingPartner] = useState<User | null>(null);
   const [generatedAccess, setGeneratedAccess] = useState<GeneratedAccess | null>(null);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -163,13 +163,6 @@ export default function PartnersPage() {
     return () => unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!openMenuId) return;
-    const close = () => setOpenMenuId(null);
-    document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
-  }, [openMenuId]);
-
   const handleDelete = async (id: string) => {
     const confirmed = confirm(
       '¿Estás seguro de eliminar este partner?\n\nEsto eliminará también su usuario de acceso (Auth) para que el email pueda reutilizarse.'
@@ -177,25 +170,32 @@ export default function PartnersPage() {
     if (!confirmed) return;
 
     try {
+      setDeletingId(id);
       const token = await auth.currentUser?.getIdToken();
-      if (!token) {
-        alert('Sesión no válida. Vuelve a iniciar sesión.');
-        return;
+      if (token) {
+        const res = await fetch(`/api/admin/users/${id}/delete`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const payload = await res.json().catch(() => null);
+        if (res.ok) return;
+
+        console.warn('Partner delete API failed, trying Firestore fallback:', payload);
       }
 
-      const res = await fetch(`/api/admin/users/${id}/delete`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      const payload = await res.json().catch(() => null);
-      if (!res.ok) {
-        alert(payload?.error || 'No se pudo eliminar el partner.');
-        return;
-      }
+      // Fallback path: at least remove the Firestore user doc so the card disappears.
+      await deleteDoc(doc(db, 'users', id));
+      alert('Partner eliminado del panel. Si el Auth no se eliminó, el email podría quedar reservado.');
     } catch (error) {
       console.error('Error deleting partner:', error);
-      alert('Error al eliminar el partner');
+      const message =
+        typeof error === 'object' && error && 'message' in error && typeof (error as { message?: unknown }).message === 'string'
+          ? (error as { message: string }).message
+          : 'Error al eliminar el partner';
+      alert(message);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -266,53 +266,6 @@ export default function PartnersPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {partners.map((partner) => (
           <div key={partner.id} className="bg-white rounded-xl shadow-sm p-6 border border-gray-200 hover:shadow-md transition-shadow group relative">
-            
-            <div className="absolute top-4 right-4">
-              <div className="relative">
-                <button
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setOpenMenuId((prev) => (prev === partner.id ? null : partner.id));
-                  }}
-                  className="btn-icon text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-                  title="Acciones"
-                >
-                  <MoreVertical size={18} />
-                </button>
-
-                {openMenuId === partner.id && (
-                  <div
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden z-10"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenMenuId(null);
-                        setEditingPartner(partner);
-                        setIsModalOpen(true);
-                      }}
-                      className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2"
-                    >
-                      <Pencil size={16} className="text-slate-500" />
-                      Editar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenMenuId(null);
-                        handleDelete(partner.id);
-                      }}
-                      className="w-full px-3 py-2 text-left text-sm hover:bg-rose-50 text-rose-700 flex items-center gap-2"
-                    >
-                      <Trash2 size={16} className="text-rose-600" />
-                      Eliminar
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
 
             <div className="flex justify-between items-start mb-4 pr-8">
               <div>
@@ -377,6 +330,26 @@ export default function PartnersPage() {
                 >
                   <Lock size={14} />
                   {(partner.invite_status ?? 'pending') === 'generated' ? 'Regenerar acceso' : 'Generar acceso'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingPartner(partner);
+                    setIsModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  <Pencil size={14} />
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(partner.id)}
+                  disabled={deletingId === partner.id}
+                  className="inline-flex items-center gap-2 rounded-xl border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                >
+                  <Trash2 size={14} />
+                  {deletingId === partner.id ? 'Eliminando...' : 'Eliminar'}
                 </button>
               </div>
 
@@ -563,7 +536,30 @@ function PartnerForm({
       };
 
       if (initialData) {
-        await updateDoc(doc(db, 'users', initialData.id), commonData);
+        let updated = false;
+        const token = await auth.currentUser?.getIdToken();
+
+        if (token) {
+          const res = await fetch(`/api/admin/users/${initialData.id}/update-partner`, {
+            method: 'PATCH',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(commonData),
+          });
+
+          if (res.ok) {
+            updated = true;
+          } else {
+            const payload = await res.json().catch(() => null);
+            console.warn('Partner update API failed, trying Firestore fallback:', payload);
+          }
+        }
+
+        if (!updated) {
+          await updateDoc(doc(db, 'users', initialData.id), commonData);
+        }
       } else {
         const passwordToUse = generateAccessNow ? sharedPassword : makePassword(18);
 
