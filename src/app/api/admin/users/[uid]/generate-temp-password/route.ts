@@ -15,7 +15,7 @@ function generateTempPassword(length = 10) {
   return out;
 }
 
-async function requireAdmin(req: NextRequest) {
+async function requireStaff(req: NextRequest) {
   const authHeader = req.headers.get('authorization') || '';
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!match) {
@@ -26,7 +26,7 @@ async function requireAdmin(req: NextRequest) {
     const decoded = await getAdminAuth().verifyIdToken(match[1]);
     const callerSnap = await getAdminDb().collection('users').doc(decoded.uid).get();
     const caller = callerSnap.exists ? callerSnap.data() : null;
-    if (!caller || caller.rol !== 'admin') {
+    if (!caller || (caller.rol !== 'admin' && caller.rol !== 'colaborador')) {
       return { ok: false as const, status: 403, message: 'Forbidden.' };
     }
     return { ok: true as const, uid: decoded.uid };
@@ -39,7 +39,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ uid: string }> }
 ) {
-  const admin = await requireAdmin(req);
+  const admin = await requireStaff(req);
   if (!admin.ok) {
     return NextResponse.json({ error: admin.message }, { status: admin.status });
   }
