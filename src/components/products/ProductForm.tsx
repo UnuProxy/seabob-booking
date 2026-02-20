@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { Product, ProductType } from '@/types';
 import { addDoc, collection, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db, auth, storage } from '@/lib/firebase/config';
-import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
+import { app, db, auth, storageBucketCandidates } from '@/lib/firebase/config';
+import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { ImageUp, X } from 'lucide-react';
 
 interface ProductFormProps {
@@ -13,9 +13,34 @@ interface ProductFormProps {
   onSuccess: () => void;
 }
 
+const getErrorMessage = (error: unknown): string =>
+  typeof error === 'object' && error && 'message' in error
+    ? String((error as { message?: unknown }).message || '')
+    : '';
+
+const getErrorCode = (error: unknown): string =>
+  typeof error === 'object' && error && 'code' in error
+    ? String((error as { code?: unknown }).code || '')
+    : '';
+
+const shouldRetryWithAnotherBucket = (error: unknown): boolean => {
+  const code = getErrorCode(error);
+  const message = getErrorMessage(error).toLowerCase();
+  if (code === 'storage/unknown') return true;
+
+  return (
+    message.includes('not found') ||
+    message.includes('cors') ||
+    message.includes('preflight') ||
+    message.includes('err_failed') ||
+    message.includes('failed to fetch')
+  );
+};
+
 export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormProps) {
   const [loading, setLoading] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [removeCurrentImage, setRemoveCurrentImage] = useState(false);
   const [formData, setFormData] = useState<Partial<Product>>({
     nombre: '',
     descripcion: '',
@@ -37,11 +62,15 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
         throw new Error('Por favor, sube una imagen.');
       }
 
+      const previousImageUrl = productToEdit?.imagen_url?.trim() || '';
+      const shouldDeleteCurrentImage = Boolean(productToEdit?.id && previousImageUrl && (removeCurrentImage || imageFile));
+
       const productData: Record<string, unknown> = {
         ...formData,
         precio_diario: Number(formData.precio_diario) || 0,
         deposito: Number(formData.deposito) || 0,
         comision: Number(formData.comision) || 0,
+        imagen_url: removeCurrentImage && !imageFile ? '' : formData.imagen_url || '',
         creado_por: auth.currentUser?.uid,
         updated_at: serverTimestamp(),
       };
@@ -74,26 +103,76 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
           .replace(/^-|-$/g, '');
 
         const path = `products/${productId}/${Date.now()}-${safeName || 'image'}`;
-        const fileRef = storageRef(storage, path);
-        await uploadBytes(fileRef, imageFile, { contentType: imageFile.type });
-        const url = await getDownloadURL(fileRef);
+        const bucketsToTry = storageBucketCandidates.length > 0 ? storageBucketCandidates : [undefined];
+        let url = '';
+        let lastError: unknown;
+        const triedBuckets: string[] = [];
+
+        for (const bucket of bucketsToTry) {
+          try {
+            triedBuckets.push(bucket || '(default)');
+            const bucketStorage = bucket ? getStorage(app, `gs://${bucket}`) : getStorage(app);
+            const fileRef = storageRef(bucketStorage, path);
+            await uploadBytes(fileRef, imageFile, { contentType: imageFile.type });
+            url = await getDownloadURL(fileRef);
+            break;
+          } catch (error) {
+            lastError = error;
+            const canRetry = shouldRetryWithAnotherBucket(error);
+            if (!canRetry) {
+              throw error;
+            }
+          }
+        }
+
+        if (!url) {
+          const code = getErrorCode(lastError);
+          const message = getErrorMessage(lastError).toLowerCase();
+          const bucketLikelyMissing =
+            code === 'storage/unknown' ||
+            message.includes('not found') ||
+            message.includes('cors') ||
+            message.includes('preflight');
+
+          if (bucketLikelyMissing) {
+            throw new Error(
+              `No se pudo acceder a ningún bucket de Firebase Storage (${triedBuckets.join(', ')}). ` +
+              'Revisa en Firebase Console > Storage el nombre exacto del bucket y actualiza NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET.'
+            );
+          }
+
+          throw lastError || new Error('No se pudo subir la imagen al bucket de Storage.');
+        }
 
         await updateDoc(doc(db, 'products', productId), {
           imagen_url: url,
           updated_at: serverTimestamp(),
         });
+
+        if (shouldDeleteCurrentImage && previousImageUrl && previousImageUrl !== url) {
+          try {
+            const previousImageRef = storageRef(getStorage(app), previousImageUrl);
+            await deleteObject(previousImageRef);
+          } catch (cleanupError) {
+            console.warn('No se pudo eliminar la imagen anterior:', cleanupError);
+          }
+        }
       } else if (productToEdit?.id) {
-        // If editing and no file selected, keep existing imagen_url as-is.
+        if (shouldDeleteCurrentImage && previousImageUrl) {
+          try {
+            const previousImageRef = storageRef(getStorage(app), previousImageUrl);
+            await deleteObject(previousImageRef);
+          } catch (cleanupError) {
+            console.warn('No se pudo eliminar la imagen anterior:', cleanupError);
+          }
+        }
       }
 
       onSuccess();
       onClose();
     } catch (error) {
       console.error('Error saving product:', error);
-      const message =
-        typeof error === 'object' && error && 'message' in error
-          ? String((error as { message?: unknown }).message || '')
-          : '';
+      const message = getErrorMessage(error);
       alert(message || 'Error al guardar el producto');
     } finally {
       setLoading(false);
@@ -252,14 +331,30 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
                   onChange={(e) => {
                     const file = e.target.files?.[0] || null;
                     setImageFile(file);
+                    if (file) setRemoveCurrentImage(false);
                   }}
                   className="mt-3 block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-slate-800"
                 />
 
-                {productToEdit?.imagen_url && !imageFile && (
-                  <p className="text-xs text-slate-500 mt-2">
-                    Este producto ya tiene una imagen guardada. Sube otra para reemplazarla.
-                  </p>
+                {productToEdit?.imagen_url && (
+                  <div className="mt-2 space-y-2">
+                    <p className="text-xs text-slate-500">
+                      {imageFile
+                        ? 'La imagen actual se reemplazará al guardar.'
+                        : removeCurrentImage
+                          ? 'La imagen actual se eliminará al guardar.'
+                          : 'Este producto ya tiene una imagen guardada. Sube otra para reemplazarla o elimínala.'}
+                    </p>
+                    {!imageFile && (
+                      <button
+                        type="button"
+                        onClick={() => setRemoveCurrentImage((prev) => !prev)}
+                        className="text-xs font-semibold text-rose-700 hover:text-rose-800 underline"
+                      >
+                        {removeCurrentImage ? 'Cancelar eliminación de imagen' : 'Eliminar imagen actual'}
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

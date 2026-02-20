@@ -1,0 +1,36 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return signedIn()
+        ? firestore.get(/databases/(default)/documents/users/$(request.auth.uid))
+        : null;
+    }
+
+    function hasUserDoc() {
+      return signedIn() && userDoc().data != null;
+    }
+
+    function isInternalUser() {
+      return hasUserDoc()
+        && (
+          userDoc().data.rol == 'admin'
+          || userDoc().data.rol == 'colaborador'
+        );
+    }
+
+    // Product catalog images are public-read, internal-user-write.
+    match /products/{productId}/{fileName} {
+      allow read: if true;
+      allow write: if isInternalUser();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
