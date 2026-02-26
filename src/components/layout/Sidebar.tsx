@@ -12,11 +12,11 @@ import {
   FileText, 
   Settings, 
   LogOut,
-  Link2,
   Briefcase,
   X,
   Coins,
-  LineChart
+  LineChart,
+  Activity
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
@@ -45,6 +45,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     { name: 'Stock Diario', href: '/admin/stock', icon: CalendarDays, roles: ['admin', 'colaborador'], group: 'primary' },
     { name: 'Comisiones', href: '/admin/comisiones', icon: Coins, roles: ['admin'], group: 'secondary' },
     { name: 'Finanzas', href: '/admin/finanzas', icon: LineChart, roles: ['admin'], group: 'secondary' },
+    { name: 'Activity', href: '/admin/activity', icon: Activity, roles: ['admin'], group: 'secondary' },
     { name: 'Contratos', href: '/admin/contratos', icon: FileText, roles: ['admin', 'colaborador'], group: 'secondary' },
     { name: 'Brokers/Agencias', href: '/admin/partners', icon: Briefcase, roles: ['admin'], group: 'secondary' },
     { name: 'Usuarios', href: '/admin/usuarios', icon: Users, roles: ['admin'], group: 'secondary' },

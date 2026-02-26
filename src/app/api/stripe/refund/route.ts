@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
     }
 
     const refundAmount = Number(amount);
-    const maxRefundable = (booking.precio_total || 0) + (booking.deposito_total || 0);
+    const maxRefundable = booking.precio_total || 0;
     if (!Number.isFinite(refundAmount) || refundAmount <= 0 || refundAmount > maxRefundable) {
       return NextResponse.json({ error: 'Invalid refund amount' }, { status: 400 });
     }

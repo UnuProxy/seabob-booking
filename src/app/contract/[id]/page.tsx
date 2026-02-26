@@ -126,7 +126,7 @@ const CONTRACT_COPY = {
       clauses: [
         {
           title: '1º',
-          text: `El plazo de alquiler del objeto ofertado por el arrendador y que el arrendatario está interesado en alquilar tendrá la duración indicada en el anverso de este documento y el arrendatario tomará posesión de la fecha pactada, con la batería completamente cargada (según corresponda), previo pago del monto total del alquiler y la fianza de seguridad asociada. El consumo del cargo antes de la devolución del objeto no dará derecho al arrendatario al prorrateo del precio pagado por el alquiler del objeto. El suministro de información falsa por parte del arrendatario en cualquiera de las especificaciones particulares de este contrato dará lugar a la terminación inmediata del mismo, en cuyo caso las cantidades pagadas por adelantado se perderán a favor del arrendador. El arrendatario pagará al arrendador las siguientes cantidades si este último cancela el alquiler acordado del objeto por cualquier motivo: 5% por cancelación con más de tres meses de antelación antes de la fecha de inicio del alquiler acordado; 25% por cancelación con más de un mes y menos de tres meses de antelación; 50% con más de siete días y menos de un mes de anticipación y 100% con menos de siete días de anticipación. El arrendador devolverá las cantidades pagadas por adelantado que superen los porcentajes antes mencionados.`,
+          text: `El plazo de alquiler del objeto ofertado por el arrendador y que el arrendatario está interesado en alquilar tendrá la duración indicada en el anverso de este documento y el arrendatario tomará posesión de la fecha pactada, con la batería completamente cargada (según corresponda), previo pago del monto total del alquiler. El consumo del cargo antes de la devolución del objeto no dará derecho al arrendatario al prorrateo del precio pagado por el alquiler del objeto. El suministro de información falsa por parte del arrendatario en cualquiera de las especificaciones particulares de este contrato dará lugar a la terminación inmediata del mismo, en cuyo caso las cantidades pagadas por adelantado se perderán a favor del arrendador. El arrendatario pagará al arrendador las siguientes cantidades si este último cancela el alquiler acordado del objeto por cualquier motivo: 5% por cancelación con más de tres meses de antelación antes de la fecha de inicio del alquiler acordado; 25% por cancelación con más de un mes y menos de tres meses de antelación; 50% con más de siete días y menos de un mes de anticipación y 100% con menos de siete días de anticipación. El arrendador devolverá las cantidades pagadas por adelantado que superen los porcentajes antes mencionados.`,
         },
         {
           title: '2º',
@@ -149,7 +149,7 @@ const CONTRACT_COPY = {
         },
         {
           title: '5º',
-          text: `El arrendatario deberá depositar la fianza indicada en el anverso de este documento con el arrendador como garantía por cualquier pérdida, daño, robo o demora en la devolución del objeto alquilado. No obstante, el monto de dicha fianza será devuelto al arrendatario en caso de que la embarcación se encuentre en condiciones satisfactorias a la devolución.`,
+          text: `El arrendatario responderá frente al arrendador por cualquier pérdida, daño, robo o demora en la devolución del objeto alquilado, debiendo asumir los costes de reparación, reposición o perjuicios ocasionados.`,
         },
         {
           title: '6º',
@@ -157,7 +157,7 @@ const CONTRACT_COPY = {
         },
         {
           title: '7º',
-          text: `Las siguientes son prácticas prohibidas y medidas a tomar en consideración para el uso seguro y eficiente del objeto. El incumplimiento de alguno de los mismos dará lugar a la ejecución de la fianza de garantía por indemnización punitiva y económica:`,
+          text: `Las siguientes son prácticas prohibidas y medidas a tomar en consideración para el uso seguro y eficiente del objeto. El incumplimiento de alguna de ellas podrá dar lugar a la correspondiente reclamación e indemnización económica:`,
           subclauses: [
             '1ª El objeto alquilado no puede ser utilizado por personas menores de dieciséis (16) años sin la supervisión de un adulto. Las siguientes personas no pueden utilizar el objeto alquilado: mujeres embarazadas, personas con marcapasos cardíaco, personas con problemas de salud previos, personas que muestren signos de embriaguez, uso de drogas o uso de medicamentos que puedan reducir su capacidad física y reflejos.',
             '2ª La embarcación alquilada no podrá ser amarrada en canales de acceso a playas, dejarla junto a cualquier otra embarcación u objeto flotante ni dejarse amarrada en la costa o en zonas rocosas o bajíos. Tampoco podrá ser utilizado para labores de salvamento marítimo, navegación nocturna, participación en regatas, pesca de cualquier tipo o como ayuda a la pesca ni para realizar ningún tipo de actividad ilegal o sujeta a sanción.',
@@ -175,7 +175,7 @@ const CONTRACT_COPY = {
         },
         {
           title: '8º',
-          text: `En caso de pérdida o desaparición del objeto alquilado imputable a negligencia, imprudencia o cualquier otra forma de mal uso del arrendatario, el arrendador tendrá derecho a reclamar una indemnización por importe igual al valor de mercado del artefacto en el momento del siniestro y retendrá la fianza de seguridad como pago a cuenta de la liquidación final.`,
+          text: `En caso de pérdida o desaparición del objeto alquilado imputable a negligencia, imprudencia o cualquier otra forma de mal uso del arrendatario, el arrendador tendrá derecho a reclamar una indemnización por importe igual al valor de mercado del artefacto en el momento del siniestro.`,
         },
         {
           title: '9º',
@@ -290,7 +290,7 @@ const CONTRACT_COPY = {
       clauses: [
         {
           title: '1',
-          text: `The rental period of the item offered by the lessor and requested by the lessee shall be the duration indicated on the front of this document and the lessee shall take possession on the agreed date, with the battery fully charged (as applicable), after payment of the total rental amount and the associated security deposit. Use of the charge before return of the item does not entitle the lessee to any prorated refund of the rental price. Providing false information in any of the specific details of this contract will result in immediate termination, and any amounts paid in advance will be retained by the lessor. The lessee will pay the lessor the following amounts if the lessee cancels the agreed rental for any reason: 5% for cancellation more than three months before the agreed start date; 25% for cancellation more than one month and less than three months before; 50% for cancellation more than seven days and less than one month before; and 100% for cancellation with less than seven days' notice. The lessor will refund any amounts paid in advance exceeding the percentages mentioned above.`,
+          text: `The rental period of the item offered by the lessor and requested by the lessee shall be the duration indicated on the front of this document and the lessee shall take possession on the agreed date, with the battery fully charged (as applicable), after payment of the total rental amount. Use of the charge before return of the item does not entitle the lessee to any prorated refund of the rental price. Providing false information in any of the specific details of this contract will result in immediate termination, and any amounts paid in advance will be retained by the lessor. The lessee will pay the lessor the following amounts if the lessee cancels the agreed rental for any reason: 5% for cancellation more than three months before the agreed start date; 25% for cancellation more than one month and less than three months before; 50% for cancellation more than seven days and less than one month before; and 100% for cancellation with less than seven days' notice. The lessor will refund any amounts paid in advance exceeding the percentages mentioned above.`,
         },
         {
           title: '2',
@@ -313,7 +313,7 @@ const CONTRACT_COPY = {
         },
         {
           title: '5',
-          text: `The lessee must deposit the security deposit indicated on the front of this document with the lessor as a guarantee for any loss, damage, theft, or delay in returning the rented item. However, the amount of the deposit will be returned to the lessee if the craft is in satisfactory condition upon return.`,
+          text: `The lessee shall be liable to the lessor for any loss, damage, theft, or delay in returning the rented item, and must assume the corresponding repair, replacement, or consequential costs.`,
         },
         {
           title: '6',
@@ -321,7 +321,7 @@ const CONTRACT_COPY = {
         },
         {
           title: '7',
-          text: `The following are prohibited practices and measures to be considered for the safe and efficient use of the item. Failure to comply with any of them will result in execution of the security deposit as punitive and financial compensation:`,
+          text: `The following are prohibited practices and measures to be considered for the safe and efficient use of the item. Failure to comply with any of them may result in the corresponding claim and financial compensation:`,
           subclauses: [
             '1. The rented item may not be used by persons under sixteen (16) years of age without adult supervision. The following persons may not use the rented item: pregnant women, persons with cardiac pacemakers, persons with pre-existing health problems, persons showing signs of intoxication, drug use or use of medicines that may reduce their physical capacity and reflexes.',
             '2. The rented craft may not be moored in access channels to beaches, left alongside any other vessel or floating object, nor left moored on the shore or in rocky or shallow areas. Nor may it be used for maritime rescue operations, night navigation, participation in regattas, fishing of any kind or as an aid to fishing, nor for any illegal activity or activity subject to sanctions.',
@@ -339,7 +339,7 @@ const CONTRACT_COPY = {
         },
         {
           title: '8',
-          text: `In case of loss or disappearance of the rented item attributable to negligence, imprudence, or any other form of misuse by the lessee, the lessor shall be entitled to claim compensation equal to the market value of the device at the time of the loss and will retain the security deposit as partial payment of the final settlement.`,
+          text: `In case of loss or disappearance of the rented item attributable to negligence, imprudence, or any other form of misuse by the lessee, the lessor shall be entitled to claim compensation equal to the market value of the device at the time of the loss.`,
         },
         {
           title: '9',
@@ -398,8 +398,7 @@ export default function ContractPage() {
   const [paymentSyncAttempted, setPaymentSyncAttempted] = useState(false);
   const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
   const [paymentLinkError, setPaymentLinkError] = useState<string | null>(null);
-  const depositTotal = booking?.deposito_total || 0;
-  const totalToPay = booking ? booking.precio_total + depositTotal : 0;
+  const totalToPay = booking ? booking.precio_total : 0;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -927,22 +926,7 @@ export default function ContractPage() {
                     €{booking.precio_total.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                   </span>
                 </div>
-                {depositTotal > 0 && (
-                  <div className="flex justify-between items-center text-gray-700">
-                    <span>{copy.labels.deposit}</span>
-                    <span>
-                      €{depositTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                )}
               </div>
-              {depositTotal > 0 && (
-                <p className="text-xs text-gray-500">
-                  {lang === 'es'
-                    ? 'El depósito se reembolsa en 24h si no hay incidencias.'
-                    : 'The deposit is refunded within 24h if there are no incidents.'}
-                </p>
-              )}
               <div className="border-t border-gray-200 pt-3 mt-3 flex justify-between items-center">
                 <span className="font-bold text-gray-900">{copy.labels.totalToPay}</span>
                 <span className="font-bold text-xl text-gray-900">
@@ -1032,13 +1016,6 @@ export default function ContractPage() {
                 {paymentLinkError && (
                   <div className="text-xs text-red-600 mt-2">{paymentLinkError}</div>
                 )}
-              </div>
-            )}
-            {depositTotal > 0 && (
-              <div className="mt-3 text-xs text-slate-500 text-center">
-                {lang === 'es'
-                  ? `Se cobra un depósito reembolsable de €${depositTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}. Se devuelve en 24h si no hay incidencias.`
-                  : `A refundable deposit of €${depositTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} is charged. It is refunded within 24h if there are no incidents.`}
               </div>
             )}
           </section>

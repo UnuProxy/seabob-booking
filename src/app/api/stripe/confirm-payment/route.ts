@@ -59,12 +59,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ updated: false, paid: false });
     }
 
-    const expectedAmount = Math.round(((booking.precio_total || 0) + (booking.deposito_total || 0)) * 100);
-    if (!Number.isFinite(expectedAmount) || expectedAmount <= 0) {
+    const expectedAmountRentalOnly = Math.round((booking.precio_total || 0) * 100);
+    const expectedAmountWithDeposit = Math.round(
+      ((booking.precio_total || 0) + (booking.deposito_total || 0)) * 100
+    );
+    if (
+      !Number.isFinite(expectedAmountRentalOnly) ||
+      expectedAmountRentalOnly <= 0 ||
+      !Number.isFinite(expectedAmountWithDeposit) ||
+      expectedAmountWithDeposit <= 0
+    ) {
       return NextResponse.json({ error: 'Invalid booking amount' }, { status: 409 });
     }
 
-    if (typeof session.amount_total === 'number' && session.amount_total !== expectedAmount) {
+    if (
+      typeof session.amount_total === 'number' &&
+      session.amount_total !== expectedAmountRentalOnly &&
+      session.amount_total !== expectedAmountWithDeposit
+    ) {
       return NextResponse.json({ error: 'Amount mismatch' }, { status: 409 });
     }
 
@@ -80,12 +92,6 @@ export async function POST(request: NextRequest) {
       typeof session.payment_intent === 'string'
         ? session.payment_intent
         : session.payment_intent?.id;
-
-    const depositTotal = Number(booking.deposito_total || 0);
-    const depositAutoRefundAt =
-      depositTotal > 0 && !booking.deposito_auto_reembolso_en
-        ? new Date(Date.now() + 24 * 60 * 60 * 1000)
-        : undefined;
 
     const hasPartner = Boolean(booking.broker_id || booking.agency_id);
     let computedCommission = hasPartner ? calculateCommissionTotal(booking) : 0;
@@ -120,7 +126,6 @@ export async function POST(request: NextRequest) {
       estado: 'confirmada',
       confirmado_en: FieldValue.serverTimestamp(),
       updated_at: FieldValue.serverTimestamp(),
-      ...(depositAutoRefundAt ? { deposito_auto_reembolso_en: depositAutoRefundAt } : {}),
       ...(hasPartner && computedCommission > 0 && !(booking.comision_total && booking.comision_total > 0)
         ? { comision_total: computedCommission, comision_pagada: booking.comision_pagada || 0 }
         : {}),

@@ -181,23 +181,10 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
   };
 
-  const getItemDeposit = (item: BookingItem, product?: Product) => {
-    if (!product) return 0;
-    const deposit = product.deposito || 0;
-    return deposit * item.cantidad;
-  };
-
   const calculateRentalTotal = () => {
     return items.reduce((acc, item) => {
       const product = products.find(p => p.id === item.producto_id);
       return acc + getItemSubtotal(item, product);
-    }, 0);
-  };
-
-  const calculateDepositTotal = () => {
-    return items.reduce((acc, item) => {
-      const product = products.find(p => p.id === item.producto_id);
-      return acc + getItemDeposit(item, product);
     }, 0);
   };
 
@@ -244,8 +231,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
       const rentalTotal = calculateRentalTotal();
-      const depositTotal = calculateDepositTotal();
-      const totalAmount = rentalTotal + depositTotal;
+      const totalAmount = rentalTotal;
       
       // Build items with product names, prices, and commission rates
       const itemsWithNames = items.map((item) => {
@@ -259,7 +245,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
               ? product?.precio_hora || 0
               : product?.precio_diario || 0,
           comision_percent: product?.comision || 0, // Store commission rate at time of booking
-          deposito_unitario: product?.deposito || 0,
+          deposito_unitario: 0,
         };
       });
       
@@ -297,8 +283,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         fecha_inicio: startDate,
         fecha_fin: endDate,
         precio_total: rentalTotal,
-        deposito_total: depositTotal,
-        ...(depositTotal > 0 ? { deposito_reembolsado: false } : {}),
+        deposito_total: 0,
         estado: user.rol === 'admin' && skipPayment ? 'confirmada' : 'pendiente',
         acuerdo_firmado: false,
         
@@ -460,8 +445,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   };
 
   const rentalTotal = calculateRentalTotal();
-  const depositTotal = calculateDepositTotal();
-  const total = rentalTotal + depositTotal;
+  const total = rentalTotal;
   const dayCount = Math.max(1, differenceInDays(new Date(endDate), new Date(startDate)));
 
   const copyText = (text: string) => {
@@ -942,9 +926,6 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             <span className="text-sm text-gray-500 font-medium">Total Estimado</span>
             <div className="text-xs text-gray-500 mt-1 space-y-1">
               <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
-              {depositTotal > 0 && (
-                <div>Depósito reembolsable: €{depositTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
-              )}
             </div>
             <span className="text-3xl font-bold text-slate-900">€{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
           </div>

@@ -15,6 +15,58 @@ const stripe = process.env.STRIPE_SECRET_KEY
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+const getPaymentErrorDetails = (paymentIntent: Stripe.PaymentIntent) => {
+  const lastError = paymentIntent.last_payment_error;
+  return {
+    code: lastError?.code || null,
+    message: lastError?.message || null,
+  };
+};
+
+const resolveBookingIdFromPaymentIntent = async (
+  adminDb: ReturnType<typeof getAdminDb>,
+  paymentIntent: Stripe.PaymentIntent
+) => {
+  if (paymentIntent.metadata?.booking_id) {
+    return paymentIntent.metadata.booking_id;
+  }
+
+  const byIntentSnapshot = await adminDb
+    .collection('bookings')
+    .where('stripe_payment_intent_id', '==', paymentIntent.id)
+    .limit(1)
+    .get();
+
+  if (!byIntentSnapshot.empty) {
+    return byIntentSnapshot.docs[0].id;
+  }
+
+  if (!stripe) return null;
+
+  const sessionList = await stripe.checkout.sessions.list({
+    payment_intent: paymentIntent.id,
+    limit: 1,
+  });
+
+  const checkoutSession = sessionList.data[0];
+  if (!checkoutSession) {
+    return null;
+  }
+
+  const bookingIdFromMetadata = checkoutSession.metadata?.booking_id;
+  if (bookingIdFromMetadata) {
+    return bookingIdFromMetadata;
+  }
+
+  const bySessionSnapshot = await adminDb
+    .collection('bookings')
+    .where('stripe_checkout_session_id', '==', checkoutSession.id)
+    .limit(1)
+    .get();
+
+  return bySessionSnapshot.empty ? null : bySessionSnapshot.docs[0].id;
+};
+
 export async function POST(request: NextRequest) {
   try {
     // Check if Stripe is configured
@@ -83,13 +135,25 @@ export async function POST(request: NextRequest) {
           break;
         }
 
-        const expectedAmount = Math.round(((bookingData.precio_total || 0) + (bookingData.deposito_total || 0)) * 100);
-        if (!Number.isFinite(expectedAmount) || expectedAmount <= 0) {
+        const expectedAmountRentalOnly = Math.round((bookingData.precio_total || 0) * 100);
+        const expectedAmountWithDeposit = Math.round(
+          ((bookingData.precio_total || 0) + (bookingData.deposito_total || 0)) * 100
+        );
+        if (
+          !Number.isFinite(expectedAmountRentalOnly) ||
+          expectedAmountRentalOnly <= 0 ||
+          !Number.isFinite(expectedAmountWithDeposit) ||
+          expectedAmountWithDeposit <= 0
+        ) {
           console.error(`Invalid booking amount for ${bookingId}`);
           break;
         }
 
-        if (typeof session.amount_total === 'number' && session.amount_total !== expectedAmount) {
+        if (
+          typeof session.amount_total === 'number' &&
+          session.amount_total !== expectedAmountRentalOnly &&
+          session.amount_total !== expectedAmountWithDeposit
+        ) {
           console.error(`Amount mismatch for booking ${bookingId}`);
           break;
         }
@@ -244,7 +308,34 @@ export async function POST(request: NextRequest) {
       case 'payment_intent.payment_failed': {
         const paymentIntent = event.data.object as Stripe.PaymentIntent;
         console.error(`❌ Payment intent failed: ${paymentIntent.id}`);
-        // Optionally notify admin or customer
+
+        const bookingId = await resolveBookingIdFromPaymentIntent(adminDb, paymentIntent);
+        if (!bookingId) {
+          console.error(`⚠️ Could not resolve booking for failed payment intent: ${paymentIntent.id}`);
+          break;
+        }
+
+        const bookingRef = adminDb.collection('bookings').doc(bookingId);
+        const bookingSnap = await bookingRef.get();
+        if (!bookingSnap.exists) {
+          console.error(`⚠️ Booking not found for failed payment intent: ${paymentIntent.id}`);
+          break;
+        }
+
+        const bookingData = bookingSnap.data() as Booking;
+        const attempts = Number(bookingData.stripe_payment_failed_attempts || 0) + 1;
+        const errorDetails = getPaymentErrorDetails(paymentIntent);
+
+        await bookingRef.update({
+          stripe_payment_intent_id: paymentIntent.id,
+          stripe_payment_failed_attempts: attempts,
+          stripe_last_payment_failed_at: FieldValue.serverTimestamp(),
+          stripe_last_payment_failed_code: errorDetails.code,
+          stripe_last_payment_failed_message: errorDetails.message,
+          updated_at: FieldValue.serverTimestamp(),
+        });
+
+        console.log(`⚠️ Stored Stripe payment failure for booking ${bookingId} (attempt ${attempts})`);
         break;
       }
 

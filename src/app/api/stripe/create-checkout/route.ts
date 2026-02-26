@@ -50,14 +50,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Booking expired' }, { status: 409 });
     }
 
-    const depositTotal = Number(booking.deposito_total || 0);
-    const totalDue = (booking.precio_total || 0) + depositTotal;
+    const totalDue = Number(booking.precio_total || 0);
     if (!Number.isFinite(totalDue) || totalDue <= 0) {
       return NextResponse.json({ error: 'Invalid booking amount' }, { status: 400 });
     }
 
     const rentalAmount = Math.round((booking.precio_total || 0) * 100);
-    const depositAmount = Math.round(depositTotal * 100);
 
     const resolvedEmail = booking.cliente?.email;
     const resolvedName = booking.cliente?.nombre;
@@ -73,6 +71,7 @@ export async function POST(request: NextRequest) {
       })() ||
       'http://localhost:3000';
     const bookingToken = booking.token_acceso || token || '';
+    const bookingPartnerId = booking.broker_id || booking.agency_id || '';
     const tokenParam = bookingToken ? `?t=${encodeURIComponent(bookingToken)}` : '';
     const paymentParam = bookingToken ? '&' : '?';
     const expirationValue = booking.expiracion as unknown;
@@ -102,20 +101,6 @@ export async function POST(request: NextRequest) {
       },
     ];
 
-    if (depositAmount > 0) {
-      lineItems.push({
-        price_data: {
-          currency: 'eur',
-          product_data: {
-            name: 'Depósito reembolsable',
-            description: 'Se devuelve dentro de 24h si no hay incidencias.',
-          },
-          unit_amount: depositAmount,
-        },
-        quantity: 1,
-      });
-    }
-
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'], // Card payment (Apple Pay & Google Pay show automatically when available)
@@ -125,7 +110,12 @@ export async function POST(request: NextRequest) {
         booking_id: bookingId,
         customer_name: resolvedName || '',
         booking_token: bookingToken,
-        deposit_amount: depositAmount > 0 ? depositAmount.toString() : '0',
+      },
+      payment_intent_data: {
+        metadata: {
+          booking_id: bookingId,
+          partner_id: bookingPartnerId,
+        },
       },
       locale: 'auto', // Auto-detect locale (will show EUR properly)
       ...(expirationDate
