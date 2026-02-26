@@ -2,13 +2,13 @@
 
 import { useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase/config';
 import { useAuthStore } from '@/store/authStore';
 import { User } from '@/types';
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { setUser, setLoading } = useAuthStore();
+  const { user, setUser, setLoading } = useAuthStore();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -99,6 +99,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => unsubscribe();
   }, [setUser, setLoading]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const userDocRef = doc(db, 'users', user.id);
+    const touchLastSeen = () =>
+      updateDoc(userDocRef, { last_seen_at: serverTimestamp() }).catch((err) =>
+        console.warn('Failed to update last seen:', err)
+      );
+
+    touchLastSeen();
+    const intervalId = setInterval(touchLastSeen, 60 * 1000);
+    return () => clearInterval(intervalId);
+  }, [user?.id]);
 
   return <>{children}</>;
 }

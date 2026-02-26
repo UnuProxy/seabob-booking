@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Product } from '@/types';
 import { collection, onSnapshot, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { Edit, Trash2, Power, PowerOff } from 'lucide-react';
+import { Edit, Trash2 } from 'lucide-react';
 import { ProductForm } from '@/components/products/ProductForm';
 
 export default function ProductsPage() {
@@ -113,9 +113,6 @@ export default function ProductsPage() {
                   <div className="font-semibold text-gray-900">€{product.precio_diario} <span className="text-gray-500 font-normal">/ día</span></div>
                   {product.precio_hora && product.precio_hora > 0 && (
                     <div className="text-gray-500">€{product.precio_hora} / hora</div>
-                  )}
-                  {product.deposito && product.deposito > 0 && (
-                    <div className="text-gray-500">Depósito: €{product.deposito}</div>
                   )}
                 </div>
                 

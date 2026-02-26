@@ -192,16 +192,7 @@ export default function PublicBookingPage() {
     }, 0);
   }, [items, products, dayCount]);
 
-  const depositTotal = useMemo(() => {
-    return items.reduce((acc, item) => {
-      const product = products.find((p) => p.id === item.producto_id);
-      if (!product) return acc;
-      const deposit = product.deposito || 0;
-      return acc + deposit * item.cantidad;
-    }, 0);
-  }, [items, products]);
-
-  const total = rentalTotal + depositTotal;
+  const total = rentalTotal;
 
   const updateQuantity = (productId: string, delta: number) => {
     setQuantities((prev) => {
@@ -304,7 +295,7 @@ export default function PublicBookingPage() {
               ? product?.precio_hora || 0
               : product?.precio_diario || 0,
           comision_percent: product?.comision || 0,
-          deposito_unitario: product?.deposito || 0,
+          deposito_unitario: 0,
         };
       });
 
@@ -344,8 +335,7 @@ export default function PublicBookingPage() {
         fecha_inicio: startDate,
         fecha_fin: endDate,
         precio_total: rentalTotal,
-        deposito_total: depositTotal,
-        ...(depositTotal > 0 ? { deposito_reembolsado: false } : {}),
+        deposito_total: 0,
         estado: 'pendiente',
         acuerdo_firmado: false,
         ubicacion_entrega: deliveryLocation,
@@ -906,9 +896,6 @@ export default function PublicBookingPage() {
                 </div>
                 <div className="text-xs text-slate-500 mt-2 space-y-1">
                   <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
-                  {depositTotal > 0 && (
-                    <div>Depósito reembolsable: €{depositTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
-                  )}
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
                   Precio sujeto a disponibilidad y confirmación final.

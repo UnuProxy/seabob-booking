@@ -110,6 +110,10 @@ export interface Booking {
   stripe_checkout_session_id?: string;
   stripe_payment_link?: string;
   stripe_payment_intent_id?: string;
+  stripe_payment_failed_attempts?: number;
+  stripe_last_payment_failed_at?: Date | string;
+  stripe_last_payment_failed_code?: string;
+  stripe_last_payment_failed_message?: string;
 
   // Deposit tracking
   deposito_total?: number;

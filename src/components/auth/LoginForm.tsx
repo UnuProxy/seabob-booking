@@ -10,6 +10,7 @@ export function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const router = useRouter();
   const { user } = useAuthStore();
 
@@ -27,16 +28,47 @@ export function LoginForm() {
     }
   }, [user, router]);
 
+  const getLoginErrorMessage = (err: unknown) => {
+    const code = typeof err === 'object' && err ? (err as { code?: unknown }).code : undefined;
+
+    switch (code) {
+      case 'auth/invalid-credential':
+      case 'auth/user-not-found':
+      case 'auth/wrong-password':
+        return 'Email o contraseña incorrectos.';
+      case 'auth/too-many-requests':
+        return 'Demasiados intentos fallidos. Espera unos minutos antes de volver a intentar.';
+      case 'auth/user-disabled':
+        return 'Esta cuenta está desactivada. Contacta al administrador.';
+      case 'auth/network-request-failed':
+        return 'No se pudo conectar. Revisa tu internet e inténtalo de nuevo.';
+      case 'auth/invalid-email':
+        return 'El email no tiene un formato válido.';
+      default:
+        return 'Error al iniciar sesión. Inténtalo de nuevo.';
+    }
+  };
+
   const handleLogin = async (event: FormEvent) => {
     event.preventDefault();
-    if (user) return;
+    if (user || isSubmitting) return;
 
     setError('');
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      setError('Introduce un email válido.');
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (err: any) {
-      setError('Error al iniciar sesión. Verifica tus credenciales.');
-      console.error(err);
+      await signInWithEmailAndPassword(auth, normalizedEmail, password);
+    } catch (err: unknown) {
+      setError(getLoginErrorMessage(err));
+      console.error('Login failed:', err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -77,8 +109,12 @@ export function LoginForm() {
           />
         </div>
 
-        <button type="submit" className="btn-primary w-full py-3">
-          Entrar
+        <button
+          type="submit"
+          className="btn-primary w-full py-3"
+          disabled={isSubmitting}
+        >
+          {isSubmitting ? 'Entrando...' : 'Entrar'}
         </button>
       </form>
     </div>
