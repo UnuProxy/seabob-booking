@@ -316,6 +316,11 @@ export default function PartnersPage() {
                 >
                   Acceso: {(partner.invite_status ?? 'pending') === 'generated' ? 'generado' : 'pendiente'}
                 </span>
+                {partner.allow_booking_without_payment && (
+                  <span className="text-[11px] font-semibold px-2 py-1 rounded-lg bg-blue-50 text-blue-700">
+                    Sin pago previo
+                  </span>
+                )}
 
                 <button
                   type="button"
@@ -488,6 +493,9 @@ function PartnerForm({
   const [phone, setPhone] = useState(initialData?.whatsapp_numero || '');
   const [taxId, setTaxId] = useState(initialData?.nif_cif || '');
   const [billingAddress, setBillingAddress] = useState(initialData?.direccion_facturacion || '');
+  const [allowBookingWithoutPayment, setAllowBookingWithoutPayment] = useState(
+    Boolean(initialData?.allow_booking_without_payment)
+  );
   const [generateAccessNow, setGenerateAccessNow] = useState(false);
   const [sharedPassword, setSharedPassword] = useState('');
 
@@ -533,6 +541,7 @@ function PartnerForm({
         whatsapp_numero: phone,
         direccion_facturacion: billingAddress,
         nif_cif: taxId,
+        allow_booking_without_payment: allowBookingWithoutPayment,
       };
 
       if (initialData) {
@@ -578,6 +587,7 @@ function PartnerForm({
           requires_password_change: true, // Force password change
           permisos: [],
           invite_status: generateAccessNow ? 'generated' : 'pending',
+          allow_booking_without_payment: allowBookingWithoutPayment,
         };
 
         if (generateAccessNow) {
@@ -774,6 +784,25 @@ function PartnerForm({
               )}
             </div>
           )}
+
+          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={allowBookingWithoutPayment}
+                onChange={(e) => setAllowBookingWithoutPayment(e.target.checked)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <div>
+                <p className="text-sm font-semibold text-amber-900">
+                  Permitir reserva sin pago obligatorio
+                </p>
+                <p className="text-xs text-amber-700">
+                  Si está activo, las reservas de este partner podrán firmarse sin pagar antes.
+                </p>
+              </div>
+            </label>
+          </div>
           <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-blue-700">
             <strong>ℹ️ Comisiones:</strong> Las comisiones se calculan automáticamente según el porcentaje configurado en cada producto.
           </div>

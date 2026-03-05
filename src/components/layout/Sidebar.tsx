@@ -5,7 +5,6 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { 
-  LayoutDashboard, 
   Package, 
   CalendarDays, 
   Users, 
@@ -16,7 +15,8 @@ import {
   X,
   Coins,
   LineChart,
-  Activity
+  Activity,
+  Link2
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
@@ -39,8 +39,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   };
 
   const navItems = [
-    { name: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard, roles: ['admin', 'colaborador', 'broker', 'agency'], group: 'primary' },
     { name: 'Reservas', href: '/admin/reservas', icon: CalendarDays, roles: ['admin', 'colaborador', 'broker', 'agency'], group: 'primary' },
+    { name: 'Cobros remotos', href: '/admin/cobros-remotos', icon: Link2, roles: ['admin', 'colaborador'], group: 'primary' },
     { name: 'Productos', href: '/admin/productos', icon: Package, roles: ['admin'], group: 'primary' },
     { name: 'Stock Diario', href: '/admin/stock', icon: CalendarDays, roles: ['admin', 'colaborador'], group: 'primary' },
     { name: 'Comisiones', href: '/admin/comisiones', icon: Coins, roles: ['admin'], group: 'secondary' },
@@ -82,7 +82,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
         {/* Header with Logo */}
         <div className="p-6 border-b border-white/10 flex items-center justify-between relative">
-          <div className="relative w-full h-16 bg-white/90 rounded-2xl p-2 shadow-lg shadow-black/30 border border-white/50">
+          <Link
+            href="/admin/dashboard"
+            onClick={() => {
+              if (window.innerWidth < 1024) onClose();
+            }}
+            className="relative w-full h-16 bg-white/90 rounded-2xl p-2 shadow-lg shadow-black/30 border border-white/50 block"
+            aria-label="Ir al dashboard"
+          >
             <Image
               src="/seabob-logo-CENTER_IBIZA-ROJO.png"
               alt="SeaBob Center Ibiza"
@@ -91,7 +98,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               className="object-contain object-left"
               priority
             />
-          </div>
+          </Link>
           <button 
             onClick={onClose}
             className="lg:hidden btn-icon text-white/60 hover:text-white hover:bg-white/10 absolute right-4 top-4"
@@ -104,7 +111,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         <nav className="flex-1 px-4 py-6 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
           <div className="space-y-2">
             {primaryNavItems.map((item) => {
-              const isActive = pathname.startsWith(item.href);
+              const hrefPath = item.href.split('#')[0];
+              const isActive = pathname.startsWith(hrefPath);
               return (
                 <Link
                   key={item.href}
@@ -135,7 +143,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           {secondaryNavItems.length > 0 && (
             <div className="mt-6 pt-6 border-t border-white/10 space-y-2">
               {secondaryNavItems.map((item) => {
-                const isActive = pathname.startsWith(item.href);
+                const hrefPath = item.href.split('#')[0];
+                const isActive = pathname.startsWith(hrefPath);
                 return (
                   <Link
                     key={item.href}

@@ -49,6 +49,7 @@ export async function PATCH(
   const whatsappNumero = typeof body.whatsapp_numero === 'string' ? body.whatsapp_numero.trim() : '';
   const direccionFacturacion = typeof body.direccion_facturacion === 'string' ? body.direccion_facturacion.trim() : '';
   const nifCif = typeof body.nif_cif === 'string' ? body.nif_cif.trim() : '';
+  const allowBookingWithoutPayment = body.allow_booking_without_payment === true;
 
   if (!nombre || !empresaNombre || !direccionFacturacion || !nifCif) {
     return NextResponse.json(
@@ -82,6 +83,7 @@ export async function PATCH(
       whatsapp_numero: whatsappNumero,
       direccion_facturacion: direccionFacturacion,
       nif_cif: nifCif,
+      allow_booking_without_payment: allowBookingWithoutPayment,
       actualizado_en: FieldValue.serverTimestamp(),
       actualizado_por: admin.uid,
     },

@@ -29,6 +29,7 @@ export interface User {
     broker_commission_percent: number;
     agency_commission_percent: number;
   };
+  allow_booking_without_payment?: boolean;
   activo: boolean;
   creado_por?: string;
   creado_en: Date | string;
@@ -49,8 +50,8 @@ export interface Product {
   imagen_url: string;
   activo: boolean;
   creado_por?: string;
-  creado_en?: any;
-  updated_at?: any;
+  creado_en?: unknown;
+  updated_at?: unknown;
 }
 
 export interface DailyStock {
@@ -103,6 +104,7 @@ export interface Booking {
   precio_total: number;
   
   // Payment tracking
+  requires_payment?: boolean;
   pago_realizado?: boolean;
   pago_realizado_en?: Date | string;
   pago_metodo?: PaymentMethod; // How payment was received
@@ -170,6 +172,10 @@ export interface PagoComision {
   monto: number;
   metodo: PaymentMethod;
   referencia?: string; // Bank reference, receipt number, etc.
+  documento_url?: string; // Uploaded invoice/receipt URL
+  documento_nombre?: string; // Original filename
+  documento_path?: string; // Storage path
+  documento_tipo?: string; // MIME type
   booking_ids: string[]; // Which bookings this payment covers
   notas?: string;
   creado_por: string;

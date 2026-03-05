@@ -46,6 +46,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Booking already paid' }, { status: 409 });
     }
 
+    if (booking.requires_payment === false) {
+      return NextResponse.json({ error: 'Payment is not required for this booking' }, { status: 409 });
+    }
+
     if (booking.expirado || booking.estado === 'expirada') {
       return NextResponse.json({ error: 'Booking expired' }, { status: 409 });
     }
