@@ -399,6 +399,7 @@ export default function ContractPage() {
   const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
   const [paymentLinkError, setPaymentLinkError] = useState<string | null>(null);
   const totalToPay = booking ? booking.precio_total : 0;
+  const requiresPayment = booking?.requires_payment !== false;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -438,10 +439,20 @@ export default function ContractPage() {
             setSuccess(true);
           }
 
-          const shouldSyncPayment =
-            !data.pago_realizado && !paymentSyncAttempted && data.stripe_checkout_session_id;
+          const requiresPaymentForBooking = data.requires_payment !== false;
+          const shouldSyncPayment = Boolean(
+            requiresPaymentForBooking &&
+              !data.pago_realizado &&
+              !paymentSyncAttempted &&
+              data.stripe_checkout_session_id
+          );
 
-          if ((paymentStatus === 'success' || shouldSyncPayment) && !data.pago_realizado && !paymentSyncAttempted) {
+          if (
+            (paymentStatus === 'success' || shouldSyncPayment) &&
+            requiresPaymentForBooking &&
+            !data.pago_realizado &&
+            !paymentSyncAttempted
+          ) {
             setPaymentSyncAttempted(true);
             try {
               await fetch('/api/stripe/confirm-payment', {
@@ -475,6 +486,7 @@ export default function ContractPage() {
 
   const handleGeneratePaymentLink = async () => {
     if (!booking || creatingPaymentLink) return;
+    if (!requiresPayment) return;
     setCreatingPaymentLink(true);
     setPaymentLinkError(null);
 
@@ -680,8 +692,8 @@ export default function ContractPage() {
       return;
     }
     
-    // Critical: Cannot confirm without payment
-    if (!booking.pago_realizado) {
+    // Critical: Cannot confirm without payment when payment is required
+    if (requiresPayment && !booking.pago_realizado) {
       alert(lang === 'es' 
         ? '⚠️ Debes completar el pago antes de firmar el contrato.' 
         : '⚠️ You must complete payment before signing the contract.');
@@ -946,7 +958,23 @@ export default function ContractPage() {
               <CreditCard size={20} className="text-blue-600" />
               {copy.sections.payment}
             </h2>
-            {booking.estado === 'expirada' ? (
+            {!requiresPayment ? (
+              <div className="bg-emerald-50 border-2 border-emerald-200 rounded-xl p-4 flex items-center gap-3">
+                <div className="bg-emerald-100 p-2 rounded-lg">
+                  <CheckCircle size={24} className="text-emerald-600" />
+                </div>
+                <div>
+                  <div className="font-bold text-emerald-700">
+                    {lang === 'es' ? 'Pago no obligatorio' : 'Payment not required'}
+                  </div>
+                  <div className="text-sm text-emerald-600">
+                    {lang === 'es'
+                      ? 'Este partner tiene autorización para confirmar sin pago previo.'
+                      : 'This partner is authorized to confirm without upfront payment.'}
+                  </div>
+                </div>
+              </div>
+            ) : booking.estado === 'expirada' ? (
               <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 text-center">
                 <div className="text-red-700 font-medium">
                   {lang === 'es'
@@ -1027,7 +1055,7 @@ export default function ContractPage() {
             </h2>
             
             {/* Payment Required Warning */}
-            {!booking.pago_realizado && (
+            {requiresPayment && !booking.pago_realizado && (
               <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-4 mb-4">
                 <div className="flex items-start gap-3">
                   <div className="text-orange-600 mt-0.5">
@@ -1081,10 +1109,17 @@ export default function ContractPage() {
                 id="terms"
                 checked={termsAccepted}
                 onChange={(e) => setTermsAccepted(e.target.checked)}
-                disabled={!booking.pago_realizado || booking.acuerdo_firmado}
+                disabled={(requiresPayment && !booking.pago_realizado) || booking.acuerdo_firmado}
                 className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               />
-              <label htmlFor="terms" className={`text-sm text-gray-700 font-medium select-none ${booking.pago_realizado && !booking.acuerdo_firmado ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
+              <label
+                htmlFor="terms"
+                className={`text-sm text-gray-700 font-medium select-none ${
+                  (!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado
+                    ? 'cursor-pointer'
+                    : 'cursor-not-allowed opacity-50'
+                }`}
+              >
                 {copy.terms.acceptLabel}
               </label>
             </div>
@@ -1096,7 +1131,7 @@ export default function ContractPage() {
               {copy.sections.signature}
             </h2>
             <div className={`border-2 border-dashed rounded-xl relative overflow-hidden ${
-              booking.pago_realizado && !booking.acuerdo_firmado
+              (!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado
                 ? 'border-gray-300 bg-gray-50 touch-none' 
                 : 'border-gray-200 bg-gray-100 opacity-60 cursor-not-allowed'
             }`}>
@@ -1104,19 +1139,19 @@ export default function ContractPage() {
                 ref={canvasRef}
                 width={600}
                 height={200}
-                className={`w-full h-48 ${booking.pago_realizado && !booking.acuerdo_firmado ? 'cursor-crosshair touch-none' : 'pointer-events-none'}`}
-                onMouseDown={booking.pago_realizado && !booking.acuerdo_firmado ? startDrawing : undefined}
-                onMouseMove={booking.pago_realizado && !booking.acuerdo_firmado ? draw : undefined}
-                onMouseUp={booking.pago_realizado && !booking.acuerdo_firmado ? stopDrawing : undefined}
-                onMouseLeave={booking.pago_realizado && !booking.acuerdo_firmado ? stopDrawing : undefined}
-                onTouchStart={booking.pago_realizado && !booking.acuerdo_firmado ? startDrawing : undefined}
-                onTouchMove={booking.pago_realizado && !booking.acuerdo_firmado ? draw : undefined}
-                onTouchEnd={booking.pago_realizado && !booking.acuerdo_firmado ? stopDrawing : undefined}
+                className={`w-full h-48 ${(!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado ? 'cursor-crosshair touch-none' : 'pointer-events-none'}`}
+                onMouseDown={(!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado ? startDrawing : undefined}
+                onMouseMove={(!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado ? draw : undefined}
+                onMouseUp={(!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado ? stopDrawing : undefined}
+                onMouseLeave={(!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado ? stopDrawing : undefined}
+                onTouchStart={(!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado ? startDrawing : undefined}
+                onTouchMove={(!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado ? draw : undefined}
+                onTouchEnd={(!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado ? stopDrawing : undefined}
               />
               {!signature && !isDrawing && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <p className="text-gray-400 text-sm">
-                    {booking.pago_realizado && !booking.acuerdo_firmado
+                    {(!requiresPayment || booking.pago_realizado) && !booking.acuerdo_firmado
                       ? copy.signature.hint
                       : booking.acuerdo_firmado
                       ? (lang === 'es' ? '✅ Contrato ya firmado' : '✅ Contract already signed')
@@ -1126,7 +1161,7 @@ export default function ContractPage() {
               )}
               <button
                 onClick={clearSignature}
-                disabled={!booking.pago_realizado || booking.acuerdo_firmado}
+                disabled={(requiresPayment && !booking.pago_realizado) || booking.acuerdo_firmado}
                 className="absolute top-2 right-2 btn-outline text-rose-600 border-rose-200 px-2 py-1 text-xs hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {copy.actions.clear}
@@ -1136,7 +1171,7 @@ export default function ContractPage() {
           </section>
 
           <div className="pt-6 border-t border-gray-100">
-            {!booking.pago_realizado && (
+            {requiresPayment && !booking.pago_realizado && (
               <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 mb-4 text-center">
                 <p className="font-bold text-red-900">
                   {lang === 'es' 
@@ -1152,7 +1187,13 @@ export default function ContractPage() {
             )}
             <button
               onClick={handleSubmit}
-              disabled={!termsAccepted || !signature || submitting || !booking.pago_realizado || booking.acuerdo_firmado}
+              disabled={
+                !termsAccepted ||
+                !signature ||
+                submitting ||
+                (requiresPayment && !booking.pago_realizado) ||
+                booking.acuerdo_firmado
+              }
               className="btn-primary w-full py-4 text-lg disabled:opacity-50"
             >
               {submitting ? <Loader2 className="animate-spin" size={24} /> : <CheckCircle size={24} />}

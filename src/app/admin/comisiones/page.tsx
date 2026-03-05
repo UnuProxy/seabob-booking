@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, documentId } from 'firebase/firestore';
-import { db, auth } from '@/lib/firebase/config';
-import { Booking, User, PagoComision, PartnerCommissionSummary, PaymentMethod } from '@/types';
+import { db, auth, storage } from '@/lib/firebase/config';
+import { Booking, Product, User, PagoComision, PartnerCommissionSummary, PaymentMethod } from '@/types';
 import { calculateCommissionTotal, calculateCommissionTotalWithProducts } from '@/lib/commission';
 import { Users, Clock, CheckCircle, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
 
 export default function ComisionesPage() {
   const [loading, setLoading] = useState(true);
@@ -62,14 +63,14 @@ export default function ComisionesPage() {
               .filter(Boolean)
           )
         );
-        const productsById: Record<string, any> = {};
+        const productsById: Record<string, Product> = {};
 
         for (let i = 0; i < productIds.length; i += 10) {
           const chunk = productIds.slice(i, i + 10);
           const productsQuery = query(collection(db, 'products'), where(documentId(), 'in', chunk));
           const snapshot = await getDocs(productsQuery);
           snapshot.docs.forEach((docSnap) => {
-            productsById[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+            productsById[docSnap.id] = { id: docSnap.id, ...docSnap.data() } as Product;
           });
         }
 
@@ -263,13 +264,14 @@ export default function ComisionesPage() {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Monto</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Método</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Referencia</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Documento</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reservas</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {paymentHistory.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                       No hay pagos registrados
                     </td>
                   </tr>
@@ -283,6 +285,20 @@ export default function ComisionesPage() {
                       <td className="px-6 py-4 text-sm font-medium text-green-600">€{payment.monto.toFixed(2)}</td>
                       <td className="px-6 py-4 text-sm text-gray-600 capitalize">{payment.metodo}</td>
                       <td className="px-6 py-4 text-sm text-gray-600">{payment.referencia || '-'}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {payment.documento_url ? (
+                          <a
+                            href={payment.documento_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-700 hover:underline"
+                          >
+                            {payment.documento_nombre || 'Ver PDF'}
+                          </a>
+                        ) : (
+                          '-'
+                        )}
+                      </td>
                       <td className="px-6 py-4 text-sm text-gray-600">{payment.booking_ids.length}</td>
                     </tr>
                   ))
@@ -460,6 +476,8 @@ function PaymentModal({
   onSuccess: () => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const [supportingFile, setSupportingFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState('');
   const [formData, setFormData] = useState({
     monto: partner.pendiente,
     metodo: 'transferencia' as PaymentMethod,
@@ -468,11 +486,40 @@ function PaymentModal({
     selectedBookings: partner.reservas_pendientes.map(b => b.id)
   });
 
+  const makeSafeFileName = (name: string) =>
+    name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setUploadError('');
 
     try {
+      let uploadedDocUrl: string | undefined;
+      let uploadedDocPath: string | undefined;
+      let uploadedDocName: string | undefined;
+      let uploadedDocType: string | undefined;
+
+      if (supportingFile) {
+        if (supportingFile.type !== 'application/pdf') {
+          throw new Error('Solo se permiten archivos PDF.');
+        }
+
+        const safeName = makeSafeFileName(supportingFile.name);
+        const path = `commission-documents/${partner.partner_id}/${Date.now()}-${safeName}`;
+        const fileRef = storageRef(storage, path);
+        await uploadBytes(fileRef, supportingFile, {
+          contentType: supportingFile.type || 'application/pdf',
+        });
+        uploadedDocUrl = await getDownloadURL(fileRef);
+        uploadedDocPath = path;
+        uploadedDocName = supportingFile.name;
+        uploadedDocType = supportingFile.type || 'application/pdf';
+      }
+
       // Create payment record
       const paymentData: Omit<PagoComision, 'id'> = {
         partner_id: partner.partner_id,
@@ -483,6 +530,10 @@ function PaymentModal({
         referencia: formData.referencia || undefined,
         booking_ids: formData.selectedBookings,
         notas: formData.notas || undefined,
+        documento_url: uploadedDocUrl,
+        documento_path: uploadedDocPath,
+        documento_nombre: uploadedDocName,
+        documento_tipo: uploadedDocType,
         creado_por: auth.currentUser?.uid || '',
         creado_en: new Date().toISOString()
       };
@@ -518,7 +569,12 @@ function PaymentModal({
       onSuccess();
     } catch (error) {
       console.error('Error recording payment:', error);
-      alert('Error al registrar el pago');
+      const message =
+        typeof error === 'object' && error && 'message' in error && typeof (error as { message?: unknown }).message === 'string'
+          ? (error as { message: string }).message
+          : 'Error al registrar el pago';
+      setUploadError(message);
+      alert(message);
     } finally {
       setLoading(false);
     }
@@ -650,6 +706,24 @@ function PaymentModal({
               onChange={(e) => setFormData({ ...formData, notas: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Adjuntar factura / justificante (PDF, opcional)
+            </label>
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={(e) => setSupportingFile(e.target.files?.[0] || null)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
+            />
+            {supportingFile && (
+              <p className="text-xs text-gray-500 mt-1 truncate">
+                Archivo: {supportingFile.name}
+              </p>
+            )}
+            {uploadError && <p className="text-xs text-red-600 mt-1">{uploadError}</p>}
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">

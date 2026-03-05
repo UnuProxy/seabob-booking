@@ -29,6 +29,11 @@ service firebase.storage {
       allow write: if isInternalUser();
     }
 
+    // Commission docs (invoices/receipts) are internal-only.
+    match /commission-documents/{partnerId}/{fileName} {
+      allow read, write: if isInternalUser();
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

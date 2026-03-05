@@ -266,8 +266,18 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       }
       
       // Calculate reservation expiration time (hold period)
+      const assignedPartner =
+        user.rol === 'admin' && (partnerType === 'broker' || partnerType === 'agency') && partnerId
+          ? partners.find((partner) => partner.id === partnerId)
+          : null;
+      const partnerAllowsBookingWithoutPayment =
+        (user.rol === 'broker' || user.rol === 'agency')
+          ? Boolean(user.allow_booking_without_payment)
+          : Boolean(assignedPartner?.allow_booking_without_payment);
+      const bypassPaymentRequirement = (user.rol === 'admin' && skipPayment) || partnerAllowsBookingWithoutPayment;
+
       let expiracion: Date | null = null;
-      if (!(user.rol === 'admin' && skipPayment)) {
+      if (!bypassPaymentRequirement) {
         expiracion = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
       }
       
@@ -302,6 +312,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
         firma_cliente: null,
         terminos_aceptados: false,
         pago_realizado: false,
+        requires_payment: !bypassPaymentRequirement,
         
         // Reservation hold/expiration
         expiracion: expiracion,
@@ -399,7 +410,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       }
 
       let paymentUrl: string | undefined;
-      if (!(user.rol === 'admin' && skipPayment)) {
+      if (!bypassPaymentRequirement) {
         // 3. Generate Stripe payment link
         try {
           const response = await fetch('/api/stripe/create-checkout', {
@@ -447,6 +458,8 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const rentalTotal = calculateRentalTotal();
   const total = rentalTotal;
   const dayCount = Math.max(1, differenceInDays(new Date(endDate), new Date(startDate)));
+  const userAllowsBookingWithoutPayment =
+    (user?.rol === 'broker' || user?.rol === 'agency') && Boolean(user?.allow_booking_without_payment);
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -489,7 +502,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             </div>
 
             <div className="text-xs text-slate-500">
-              El enlace del contrato incluye el botón de pago.
+              {successData.paymentUrl
+                ? 'El enlace del contrato incluye el botón de pago.'
+                : 'El enlace del contrato permite firmar sin pago previo para este partner.'}
             </div>
 
             <div className="flex justify-end gap-3">
@@ -586,7 +601,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                   </div>
                 ) : (
                   <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                    Las reservas quedan en estado pendiente hasta recibir el pago completo.
+                    {userAllowsBookingWithoutPayment
+                      ? 'Este partner puede crear reservas sin pago previo. El cliente podrá firmar sin pagar antes.'
+                      : 'Las reservas quedan en estado pendiente hasta recibir el pago completo.'}
                   </div>
                 )}
               </div>

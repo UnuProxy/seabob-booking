@@ -45,8 +45,9 @@ export default function PublicBookingPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState<{ contractUrl: string; paymentUrl?: string }>({
+  const [success, setSuccess] = useState<{ contractUrl: string; paymentUrl?: string; requiresPayment: boolean }>({
     contractUrl: '',
+    requiresPayment: true,
   });
 
   // Form State
@@ -299,6 +300,15 @@ export default function PublicBookingPage() {
         };
       });
 
+      let resolvedCreatorUser = creatorUser;
+      if (!resolvedCreatorUser && link.creado_por) {
+        const creatorSnap = await getDoc(doc(db, 'users', link.creado_por as string));
+        if (creatorSnap.exists()) {
+          resolvedCreatorUser = { id: creatorSnap.id, ...creatorSnap.data() } as AppUser;
+          setCreatorUser(resolvedCreatorUser);
+        }
+      }
+
       const getItemSubtotal = (item: BookingItem, product?: Product) => {
         if (!product) return 0;
         if (item.tipo_alquiler === 'dia') {
@@ -310,7 +320,11 @@ export default function PublicBookingPage() {
         return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
       };
 
-      const commissionPartnerRole = creatorUser?.rol === 'broker' || creatorUser?.rol === 'agency';
+      const commissionPartnerRole =
+        resolvedCreatorUser?.rol === 'broker' || resolvedCreatorUser?.rol === 'agency';
+      const partnerAllowsBookingWithoutPayment =
+        commissionPartnerRole && Boolean(resolvedCreatorUser?.allow_booking_without_payment);
+      const requiresPayment = !partnerAllowsBookingWithoutPayment;
       const comisionTotal = commissionPartnerRole
         ? itemsWithNames.reduce((total, item) => {
             const product = products.find((p) => p.id === item.producto_id);
@@ -346,6 +360,7 @@ export default function PublicBookingPage() {
         firma_cliente: null,
         terminos_aceptados: false,
         pago_realizado: false,
+        requires_payment: requiresPayment,
         comision_total: comisionTotal,
         comision_pagada: 0,
         expiracion: expiracion,
@@ -356,10 +371,10 @@ export default function PublicBookingPage() {
         creado_por: link.creado_por || null,
         public_link_id: link.id,
         origen: 'public_link',
-        ...(creatorUser?.rol === 'broker' ? { broker_id: creatorUser.id } : {}),
-        ...(creatorUser?.rol === 'agency' ? { agency_id: creatorUser.id } : {}),
-        ...(creatorUser?.rol === 'colaborador' ? { colaborador_id: creatorUser.id } : {}),
-        ...(!creatorUser || creatorUser.rol === 'admin' ? { cliente_directo: true } : {}),
+        ...(resolvedCreatorUser?.rol === 'broker' ? { broker_id: resolvedCreatorUser.id } : {}),
+        ...(resolvedCreatorUser?.rol === 'agency' ? { agency_id: resolvedCreatorUser.id } : {}),
+        ...(resolvedCreatorUser?.rol === 'colaborador' ? { colaborador_id: resolvedCreatorUser.id } : {}),
+        ...(!resolvedCreatorUser || resolvedCreatorUser.rol === 'admin' ? { cliente_directo: true } : {}),
       };
 
       const bookingRef = doc(collection(db, 'bookings'));
@@ -488,34 +503,36 @@ export default function PublicBookingPage() {
 
       let paymentUrl: string | undefined;
 
-      try {
-        const response = await fetch('/api/stripe/create-checkout', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            bookingId,
-            amount: total,
-            currency: 'eur',
-            clientEmail: clientEmail.trim(),
-            clientName: clientName.trim(),
-            bookingRef: ref,
-            token: contractToken,
-            expiresAt: Math.floor(expiracion.getTime() / 1000),
-          }),
-        });
+      if (requiresPayment) {
+        try {
+          const response = await fetch('/api/stripe/create-checkout', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              bookingId,
+              amount: total,
+              currency: 'eur',
+              clientEmail: clientEmail.trim(),
+              clientName: clientName.trim(),
+              bookingRef: ref,
+              token: contractToken,
+              expiresAt: Math.floor(expiracion.getTime() / 1000),
+            }),
+          });
 
-        if (response.ok) {
-          const { url } = await response.json();
-          paymentUrl = url;
+          if (response.ok) {
+            const { url } = await response.json();
+            paymentUrl = url;
+          }
+        } catch (paymentError) {
+          console.error('Error creating payment link:', paymentError);
         }
-      } catch (paymentError) {
-        console.error('Error creating payment link:', paymentError);
       }
 
       const contractUrl = `${window.location.origin}/contract/${bookingId}?t=${contractToken}`;
-      setSuccess({ contractUrl, paymentUrl });
+      setSuccess({ contractUrl, paymentUrl, requiresPayment });
     } catch (err) {
       console.error(err);
       setError('Hubo un problema al crear la reserva. Inténtalo otra vez.');
@@ -560,11 +577,15 @@ export default function PublicBookingPage() {
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">¡Reserva creada!</h1>
           <p className="text-gray-600 mb-6">
-            Solo falta firmar el contrato para confirmar la reserva.
+            {success.requiresPayment
+              ? 'Solo falta firmar el contrato para confirmar la reserva.'
+              : 'Solo falta firmar el contrato para confirmar la reserva. No requiere pago previo.'}
           </p>
 
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-left mb-6">
-            <p className="text-xs text-slate-500 mb-2">Enlace de firma y pago</p>
+            <p className="text-xs text-slate-500 mb-2">
+              {success.requiresPayment ? 'Enlace de firma y pago' : 'Enlace de firma'}
+            </p>
             <p className="text-xs font-mono break-all text-slate-700">{success.contractUrl}</p>
           </div>
 

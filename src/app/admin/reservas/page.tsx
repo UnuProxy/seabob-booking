@@ -12,15 +12,12 @@ import {
   CalendarDays, 
   Plus, 
   Search, 
-  Filter, 
-  MoreVertical, 
   CheckCircle2, 
   Clock, 
   XCircle, 
   FileCheck,
   Eye,
   Share2,
-  PenTool,
   CreditCard,
   User as UserIcon,
   Briefcase,
@@ -29,28 +26,53 @@ import {
   Calendar,
   Copy,
   Euro,
-  Ban
+  Ban,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
+import { useSearchParams } from 'next/navigation';
 
 export default function BookingsPage() {
   const { user } = useAuthStore();
+  const searchParams = useSearchParams();
+  const initialBookingRef = searchParams.get('bookingRef')?.trim() ?? '';
+  const initialServiceDate = searchParams.get('serviceDate')?.trim() ?? '';
+  const hasInitialDeepLink = Boolean(initialBookingRef || initialServiceDate);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [products, setProducts] = useState<Record<string, Product>>({});
   const [users, setUsers] = useState<Record<string, User>>({});
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(initialBookingRef);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'refunded'>('all');
-  const [timeFilter, setTimeFilter] = useState<'today' | 'upcoming' | 'all'>('today');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [timeFilter, setTimeFilter] = useState<'today' | 'upcoming' | 'all'>(
+    hasInitialDeepLink ? 'all' : 'today'
+  );
+  const [dateFrom, setDateFrom] = useState(initialServiceDate);
+  const [dateTo, setDateTo] = useState(initialServiceDate);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [expandedBookings, setExpandedBookings] = useState<Record<string, boolean>>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
   const [paymentManaging, setPaymentManaging] = useState<Booking | null>(null);
+
+  useEffect(() => {
+    const bookingRefParam = searchParams.get('bookingRef')?.trim() ?? '';
+    const serviceDateParam = searchParams.get('serviceDate')?.trim() ?? '';
+
+    const syncId = window.setTimeout(() => {
+      const hasDeepLink = Boolean(bookingRefParam || serviceDateParam);
+      setSearchTerm(bookingRefParam);
+      setStatusFilter('all');
+      setPaymentFilter('all');
+      setTimeFilter(hasDeepLink ? 'all' : 'today');
+      setDateFrom(serviceDateParam);
+      setDateTo(serviceDateParam);
+    }, 0);
+
+    return () => window.clearTimeout(syncId);
+  }, [searchParams]);
 
   const getDate = (timestamp: unknown): Date => {
     if (!timestamp) return new Date();
@@ -74,6 +96,41 @@ export default function BookingsPage() {
     }
 
     return date;
+  };
+
+  const isSameCalendarDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const getBookingServiceDateKey = (booking: Booking) =>
+    format(getDate(booking.fecha_inicio), 'yyyy-MM-dd');
+
+  const formatBookingServiceDateRange = (booking: Booking) => {
+    const start = getDate(booking.fecha_inicio);
+    const end = getDate(booking.fecha_fin);
+
+    if (isSameCalendarDay(start, end)) {
+      return format(start, 'dd MMM yyyy', { locale: es });
+    }
+
+    return `${format(start, 'dd MMM', { locale: es })} - ${format(end, 'dd MMM yyyy', { locale: es })}`;
+  };
+
+  const getBookingSectionLabel = (booking: Booking) => {
+    const start = getDate(booking.fecha_inicio);
+    const today = new Date();
+    const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+
+    if (isSameCalendarDay(start, today)) {
+      return `Hoy · ${format(start, 'dd MMM yyyy', { locale: es })}`;
+    }
+
+    if (isSameCalendarDay(start, tomorrow)) {
+      return `Mañana · ${format(start, 'dd MMM yyyy', { locale: es })}`;
+    }
+
+    return format(start, "EEEE, dd MMM yyyy", { locale: es });
   };
 
   const expireBookingIfNeeded = async (booking: Booking) => {
@@ -331,6 +388,10 @@ export default function BookingsPage() {
           : bookingStart > todayEnd;
 
     return matchesSearch && matchesStatus && matchesPayment && matchesTime;
+  }).sort((a, b) => {
+    const startDiff = getDate(b.fecha_inicio).getTime() - getDate(a.fecha_inicio).getTime();
+    if (startDiff !== 0) return startDiff;
+    return getDate(b.creado_en).getTime() - getDate(a.creado_en).getTime();
   });
 
   const getStatusColor = (status: string) => {
@@ -355,6 +416,94 @@ export default function BookingsPage() {
     }
   };
 
+  const resetFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('all');
+    setPaymentFilter('all');
+    setTimeFilter('today');
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  const applyTopFilter = (preset: 'today' | 'unpaidToday' | 'confirmedToday' | 'paidToday') => {
+    setSearchTerm('');
+    setDateFrom('');
+    setDateTo('');
+    setTimeFilter('today');
+
+    if (preset === 'today') {
+      setStatusFilter('all');
+      setPaymentFilter('all');
+      return;
+    }
+
+    if (preset === 'unpaidToday') {
+      setStatusFilter('all');
+      setPaymentFilter('unpaid');
+      return;
+    }
+
+    if (preset === 'confirmedToday') {
+      setStatusFilter('confirmada');
+      setPaymentFilter('all');
+      return;
+    }
+
+    setStatusFilter('all');
+    setPaymentFilter('paid');
+  };
+
+  const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+  const todayEnd = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999);
+  const todaysBookings = bookings.filter((booking) => {
+    const start = getDate(booking.fecha_inicio);
+    const end = getDate(booking.fecha_fin);
+    return end >= todayStart && start <= todayEnd;
+  });
+  const todayUnpaid = todaysBookings.filter((booking) => !booking.pago_realizado).length;
+  const todayConfirmed = todaysBookings.filter((booking) => booking.estado === 'confirmada').length;
+  const todayPaidRevenue = todaysBookings
+    .filter((booking) => booking.pago_realizado && !booking.reembolso_realizado)
+    .reduce((sum, booking) => sum + (booking.precio_total || 0), 0);
+  const hasActiveFilters = Boolean(
+    searchTerm.trim() ||
+      statusFilter !== 'all' ||
+      paymentFilter !== 'all' ||
+      timeFilter !== 'today' ||
+      dateFrom ||
+      dateTo
+  );
+  const activeTopPreset =
+    !dateFrom &&
+    !dateTo &&
+    !searchTerm.trim() &&
+    timeFilter === 'today' &&
+    statusFilter === 'all' &&
+    paymentFilter === 'all'
+      ? 'today'
+      : !dateFrom &&
+          !dateTo &&
+          !searchTerm.trim() &&
+          timeFilter === 'today' &&
+          statusFilter === 'all' &&
+          paymentFilter === 'unpaid'
+        ? 'unpaidToday'
+        : !dateFrom &&
+            !dateTo &&
+            !searchTerm.trim() &&
+            timeFilter === 'today' &&
+            statusFilter === 'confirmada' &&
+            paymentFilter === 'all'
+          ? 'confirmedToday'
+          : !dateFrom &&
+              !dateTo &&
+              !searchTerm.trim() &&
+              timeFilter === 'today' &&
+              statusFilter === 'all' &&
+              paymentFilter === 'paid'
+            ? 'paidToday'
+            : null;
+
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-24">
@@ -365,11 +514,10 @@ export default function BookingsPage() {
   }
 
   return (
-    <div className="w-full">
+      <div className="w-full min-w-0">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 sm:gap-4 mb-6 sm:mb-8">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-2">Reservas</h1>
-          <p className="text-gray-500">Gestiona y supervisa todas las reservas del sistema.</p>
         </div>
         
         <button 
@@ -382,160 +530,199 @@ export default function BookingsPage() {
       </div>
 
       {/* Quick Overview */}
-      <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-        {(() => {
-          const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-          const todayEnd = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999);
-          const todaysBookings = bookings.filter((booking) => {
-            const start = getDate(booking.fecha_inicio);
-            const end = getDate(booking.fecha_fin);
-            return end >= todayStart && start <= todayEnd;
-          });
-          const todayTotal = todaysBookings.reduce((sum, booking) => sum + (booking.precio_total || 0), 0);
-          const todayPending = todaysBookings.filter((booking) => booking.estado === 'pendiente').length;
-          const todayConfirmed = todaysBookings.filter((booking) => booking.estado === 'confirmada').length;
-          return (
-            <>
-              <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase text-gray-500 font-semibold">Reservas de Hoy</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{todaysBookings.length}</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-blue-50 text-blue-600">
-                    <Calendar size={20} />
-                  </div>
-                </div>
-              </div>
-              <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase text-gray-500 font-semibold">Pendientes Hoy</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{todayPending}</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-yellow-50 text-yellow-600">
-                    <Clock size={20} />
-                  </div>
-                </div>
-              </div>
-              <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase text-gray-500 font-semibold">Confirmadas Hoy</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{todayConfirmed}</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-green-50 text-green-600">
-                    <CheckCircle2 size={20} />
-                  </div>
-                </div>
-              </div>
-              <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase text-gray-500 font-semibold">Ingresos Hoy</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">€{todayTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-slate-900 text-white">
-                    <Euro size={20} />
-                  </div>
-                </div>
-              </div>
-            </>
-          );
-        })()}
+      <div className="mb-6 flex gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:gap-4 lg:grid-cols-4 sm:overflow-visible">
+        <button
+          type="button"
+          onClick={() => applyTopFilter('today')}
+          className={clsx(
+            'min-w-[168px] flex-shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
+            activeTopPreset === 'today' ? 'border-blue-300 ring-2 ring-blue-100' : 'border-gray-200'
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Reservas de Hoy</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{todaysBookings.length}</p>
+            </div>
+            <div className="p-2 sm:p-3 rounded-lg sm:rounded-xl bg-blue-50 text-blue-600">
+              <Calendar size={18} />
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => applyTopFilter('unpaidToday')}
+          className={clsx(
+            'min-w-[168px] flex-shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
+            activeTopPreset === 'unpaidToday' ? 'border-amber-300 ring-2 ring-amber-100' : 'border-gray-200'
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Sin Pago Hoy</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{todayUnpaid}</p>
+            </div>
+            <div className="p-2 sm:p-3 rounded-lg sm:rounded-xl bg-yellow-50 text-yellow-600">
+              <Clock size={18} />
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => applyTopFilter('confirmedToday')}
+          className={clsx(
+            'min-w-[168px] flex-shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
+            activeTopPreset === 'confirmedToday' ? 'border-green-300 ring-2 ring-green-100' : 'border-gray-200'
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Confirmadas Hoy</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{todayConfirmed}</p>
+            </div>
+            <div className="p-2 sm:p-3 rounded-lg sm:rounded-xl bg-green-50 text-green-600">
+              <CheckCircle2 size={18} />
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => applyTopFilter('paidToday')}
+          className={clsx(
+            'min-w-[168px] flex-shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
+            activeTopPreset === 'paidToday' ? 'border-slate-300 ring-2 ring-slate-100' : 'border-gray-200'
+          )}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Ingresos Hoy</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">
+                €{todayPaidRevenue.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div className="p-2 sm:p-3 rounded-lg sm:rounded-xl bg-slate-900 text-white">
+              <Euro size={18} />
+            </div>
+          </div>
+        </button>
       </div>
 
       {/* Filters & Search */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
-        <div className="relative w-full lg:flex-1 lg:min-w-[280px] lg:max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-          <input
-            type="text"
-            placeholder="Buscar por referencia, cliente, agente, email, teléfono..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50 focus:bg-white transition-all"
-          />
-        </div>
-
-        <div className="flex items-center gap-2 w-full lg:w-auto">
-          <span className="text-xs font-semibold text-gray-500 uppercase">Rango</span>
-          <div className="inline-flex rounded-full border border-gray-200 bg-gray-50 p-1">
-            {(['today', 'upcoming', 'all'] as const).map((range) => (
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6">
+        <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+          <div className="relative w-full lg:flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+            <input
+              type="text"
+              placeholder="Buscar por referencia, cliente, agente, email, teléfono..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50 focus:bg-white transition-all"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedFilters((prev) => !prev)}
+              className={clsx(
+                'inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition',
+                showAdvancedFilters
+                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                  : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+              )}
+            >
+              {showAdvancedFilters ? 'Ocultar filtros' : 'Filtros avanzados'}
+            </button>
+            {hasActiveFilters && (
               <button
-                key={range}
-                onClick={() => setTimeFilter(range)}
-                className={clsx(
-                  "whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold transition",
-                  timeFilter === range
-                    ? "bg-blue-600 text-white shadow-sm"
-                    : "text-gray-600 hover:text-gray-900"
-                )}
+                type="button"
+                onClick={resetFilters}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
-                {range === 'today' ? 'Hoy' : range === 'upcoming' ? 'Próximas' : 'Todas'}
+                Limpiar
               </button>
-            ))}
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-3 w-full lg:w-auto">
-          <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="dateFrom">
-            Fechas
-          </label>
-          <div className="flex items-center gap-2 w-full">
-            <input
-              id="dateFrom"
-              type="date"
-              value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
-              className="w-full lg:w-40 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-            <span className="text-xs font-semibold text-gray-400">a</span>
-            <input
-              id="dateTo"
-              type="date"
-              value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
-              className="w-full lg:w-40 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
+        {showAdvancedFilters && (
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="flex flex-col gap-2 w-full min-w-0">
+              <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="timeFilter">
+                Rango
+              </label>
+              <select
+                id="timeFilter"
+                value={timeFilter}
+                onChange={(event) => setTimeFilter(event.target.value as 'today' | 'upcoming' | 'all')}
+                className="w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="today">Hoy</option>
+                <option value="upcoming">Próximas</option>
+                <option value="all">Todas</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-2 w-full min-w-0">
+              <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="statusFilter">
+                Estado
+              </label>
+              <select
+                id="statusFilter"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">Todos</option>
+                <option value="pendiente">Pendiente</option>
+                <option value="confirmada">Confirmada</option>
+                <option value="completada">Completada</option>
+                <option value="cancelada">Cancelada</option>
+                <option value="expirada">Expirada</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-2 w-full min-w-0">
+              <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="paymentFilter">
+                Pago
+              </label>
+              <select
+                id="paymentFilter"
+                value={paymentFilter}
+                onChange={(event) => setPaymentFilter(event.target.value as 'all' | 'paid' | 'unpaid' | 'refunded')}
+                className="w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">Todos</option>
+                <option value="paid">Pagado</option>
+                <option value="unpaid">Pendiente</option>
+                <option value="refunded">Reembolsado</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-2 w-full min-w-0">
+              <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="dateFrom">
+                Fechas
+              </label>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 w-full min-w-0">
+                <input
+                  id="dateFrom"
+                  type="date"
+                  value={dateFrom}
+                  onChange={(event) => setDateFrom(event.target.value)}
+                  className="w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <span className="text-xs font-semibold text-gray-400">a</span>
+                <input
+                  id="dateTo"
+                  type="date"
+                  value={dateTo}
+                  onChange={(event) => setDateTo(event.target.value)}
+                  className="w-full min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3 w-full lg:w-auto">
-          <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="statusFilter">
-            Estado
-          </label>
-          <select
-            id="statusFilter"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="w-full lg:w-48 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">Todos</option>
-            <option value="pendiente">Pendiente</option>
-            <option value="confirmada">Confirmada</option>
-            <option value="completada">Completada</option>
-            <option value="cancelada">Cancelada</option>
-            <option value="expirada">Expirada</option>
-          </select>
-        </div>
-
-        <div className="flex items-center gap-3 w-full lg:w-auto">
-          <label className="text-xs font-semibold text-gray-500 uppercase" htmlFor="paymentFilter">
-            Pago
-          </label>
-          <select
-            id="paymentFilter"
-            value={paymentFilter}
-            onChange={(event) => setPaymentFilter(event.target.value as any)}
-            className="w-full lg:w-44 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="all">Todos</option>
-            <option value="paid">Pagado</option>
-            <option value="unpaid">Pendiente</option>
-            <option value="refunded">Reembolsado</option>
-          </select>
-        </div>
+        )}
       </div>
 
       {/* Bookings List */}
@@ -544,106 +731,114 @@ export default function BookingsPage() {
           <>
             {/* Mobile Cards */}
             <div className="md:hidden space-y-4">
-              {filteredBookings.map((booking) => {
+              {filteredBookings.map((booking, index) => {
                 const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
                 const todayEnd = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999);
                 const bookingStart = getDate(booking.fecha_inicio);
                 const bookingEnd = getDate(booking.fecha_fin);
                 const isToday = bookingEnd >= todayStart && bookingStart <= todayEnd;
                 const isExpanded = Boolean(expandedBookings[booking.id]);
+                const isFirstOfDateGroup =
+                  index === 0 ||
+                  getBookingServiceDateKey(booking) !== getBookingServiceDateKey(filteredBookings[index - 1]);
                 return (
-                  <div
-                    key={booking.id}
-                    className={clsx(
-                      "p-4 space-y-3 rounded-2xl border border-gray-200 bg-white shadow-sm",
-                      isToday && "border-blue-200 bg-blue-50/30"
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-xs uppercase text-gray-500 font-semibold">Referencia</div>
-                        <div className="font-mono text-sm font-semibold text-gray-900">{booking.numero_reserva}</div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {format(getDate(booking.creado_en), 'dd MMM yyyy', { locale: es })}
-                        </div>
+                  <div key={booking.id} className="space-y-2">
+                    {isFirstOfDateGroup && (
+                      <div className="px-1 pt-1">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {getBookingSectionLabel(booking)}
+                        </p>
                       </div>
-                      <div className="flex flex-col items-end gap-2">
-                        <span className={clsx(
-                          "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border",
-                          getStatusColor(booking.estado)
-                        )}>
-                          {getStatusIcon(booking.estado)}
-                          <span className="capitalize">{booking.estado}</span>
-                        </span>
-                        {isToday && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5">
-                            Hoy
+                    )}
+                    <div
+                      className={clsx(
+                        "p-4 space-y-3 rounded-2xl border border-gray-200 bg-white shadow-sm",
+                        isToday && "border-blue-200 bg-blue-50/30"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs uppercase text-gray-500 font-semibold">Referencia</div>
+                          <div className="font-mono text-sm font-semibold text-gray-900">{booking.numero_reserva}</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {formatBookingServiceDateRange(booking)}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <span className={clsx(
+                            "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border",
+                            getStatusColor(booking.estado)
+                          )}>
+                            {getStatusIcon(booking.estado)}
+                            <span className="capitalize">{booking.estado}</span>
                           </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <div className="text-xs uppercase text-gray-500 font-semibold">Cliente</div>
-                        <div className="text-gray-900 font-medium">{booking.cliente.nombre}</div>
-                        <div className="text-xs text-gray-500">{booking.cliente.email}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs uppercase text-gray-500 font-semibold">Total</div>
-                        <div className="text-gray-900 font-semibold">
-                          €{booking.precio_total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {format(parseISO(booking.fecha_inicio), 'dd MMM', { locale: es })} - {format(parseISO(booking.fecha_fin), 'dd MMM', { locale: es })}
+                          {isToday && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5">
+                              Hoy
+                            </span>
+                          )}
                         </div>
                       </div>
-                    </div>
 
-                    {!isExpanded && (
-                      <button
-                        onClick={() =>
-                          setExpandedBookings((prev) => ({
-                            ...prev,
-                            [booking.id]: !prev[booking.id],
-                          }))
-                        }
-                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                      >
-                        Ver detalles
-                      </button>
-                    )}
-
-                    {isExpanded && (
-                      <>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div>
-                            <div className="text-xs uppercase text-gray-500 font-semibold">Agente</div>
-                            <div className="text-gray-900 font-medium">{getAgentName(booking)}</div>
-                            <div className="text-xs text-gray-500">{getAgentType(booking)}</div>
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                          <div className="text-xs uppercase text-gray-500 font-semibold">Cliente</div>
+                          <div className="text-gray-900 font-medium">{booking.cliente.nombre}</div>
+                          <div className="text-xs text-gray-500">{booking.cliente.email}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs uppercase text-gray-500 font-semibold">Total</div>
+                          <div className="text-gray-900 font-semibold">
+                            €{booking.precio_total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
                           </div>
-                          <div>
-                            <div className="text-xs uppercase text-gray-500 font-semibold">Pago</div>
-                            {booking.reembolso_realizado ? (
-                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold px-2 py-0.5">
-                                <XCircle size={12} />
-                                Reembolsado
-                              </span>
-                            ) : booking.pago_realizado ? (
-                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5">
-                                <CheckCircle2 size={12} />
-                                Pagado
-                              </span>
-                            ) : (
-                              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5">
-                                <Clock size={12} />
-                                Pend. Pago
-                              </span>
-                            )}
-                          </div>
+                          <div className="text-xs text-gray-500 mt-1">Creada: {format(getDate(booking.creado_en), 'dd MMM yyyy', { locale: es })}</div>
                         </div>
+                      </div>
 
-                        <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm">
+                      {!isExpanded && (
+                        <button
+                          onClick={() =>
+                            setExpandedBookings((prev) => ({
+                              ...prev,
+                              [booking.id]: !prev[booking.id],
+                            }))
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          Ver detalles
+                        </button>
+                      )}
+
+                      {isExpanded && (
+                        <>
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <div className="text-xs uppercase text-gray-500 font-semibold">Agente</div>
+                              <div className="text-gray-900 font-medium">{getAgentName(booking)}</div>
+                              <div className="text-xs text-gray-500">{getAgentType(booking)}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs uppercase text-gray-500 font-semibold">Pago</div>
+                              {booking.reembolso_realizado ? (
+                                <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold px-2 py-0.5">
+                                  <XCircle size={12} />
+                                  Reembolsado
+                                </span>
+                              ) : booking.pago_realizado ? (
+                                <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5">
+                                  <CheckCircle2 size={12} />
+                                  Pagado
+                                </span>
+                              ) : (
+                                <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5">
+                                  <Clock size={12} />
+                                  Pend. Pago
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3 text-sm">
                       <div className="flex items-center justify-between">
                         <div className="text-xs uppercase text-gray-500 font-semibold">Entrega</div>
                         <button
@@ -664,9 +859,9 @@ export default function BookingsPage() {
                       <div className="text-xs text-gray-500">
                         {booking.numero_amarre ? `Amarre: ${booking.numero_amarre}` : 'Amarre: no indicado'}
                       </div>
-                        </div>
+                          </div>
 
-                        <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm">
+                          <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-sm">
                       <div className="flex items-center justify-between">
                         <div className="text-xs uppercase text-gray-500 font-semibold">Productos</div>
                         <button
@@ -687,9 +882,9 @@ export default function BookingsPage() {
                           </div>
                         ))}
                       </div>
-                        </div>
+                          </div>
 
-                        <div className="grid grid-cols-2 gap-3 text-xs text-gray-500">
+                          <div className="grid grid-cols-2 gap-3 text-xs text-gray-500">
                       <div className="flex items-center gap-2">
                         {booking.acuerdo_firmado ? (
                           <>
@@ -716,9 +911,9 @@ export default function BookingsPage() {
                           </>
                         )}
                       </div>
-                        </div>
+                          </div>
 
-                        <div className="flex items-center gap-2 pt-2">
+                          <div className="flex items-center gap-2 pt-2">
                       <button 
                         onClick={() => copyContractLink(booking)}
                         className="btn-ghost text-sm text-emerald-700"
@@ -760,281 +955,165 @@ export default function BookingsPage() {
                           Cancelar
                         </button>
                       )}
-                        </div>
-                        <button
-                          onClick={() =>
-                            setExpandedBookings((prev) => ({
-                              ...prev,
-                              [booking.id]: !prev[booking.id],
-                            }))
-                          }
-                          className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                        >
-                          Ocultar detalles
-                        </button>
-                      </>
-                    )}
+                          </div>
+                          <button
+                            onClick={() =>
+                              setExpandedBookings((prev) => ({
+                                ...prev,
+                                [booking.id]: !prev[booking.id],
+                              }))
+                            }
+                            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Ocultar detalles
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
 
-            {/* Desktop Table */}
-            <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Referencia</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Cliente</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Agente</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fechas</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Entrega</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Productos</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Estado</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Firmado</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Pagado</th>
-                  <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total</th>
-                  <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filteredBookings.map((booking) => {
-                  const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-                  const todayEnd = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999);
-                  const bookingStart = getDate(booking.fecha_inicio);
-                  const bookingEnd = getDate(booking.fecha_fin);
-                  const isToday = bookingEnd >= todayStart && bookingStart <= todayEnd;
-                  return (
-                  <tr
-                    key={booking.id}
-                    className={clsx(
-                      "hover:bg-gray-50/50 transition-colors group border-l-4 border-transparent",
-                      isToday && "bg-blue-50/30 border-blue-400"
+            {/* Desktop Cards */}
+            <div className="hidden md:block">
+              {filteredBookings.map((booking, index) => {
+                const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
+                const todayEnd = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999);
+                const bookingStart = getDate(booking.fecha_inicio);
+                const bookingEnd = getDate(booking.fecha_fin);
+                const isToday = bookingEnd >= todayStart && bookingStart <= todayEnd;
+                const isFirstOfDateGroup =
+                  index === 0 ||
+                  getBookingServiceDateKey(booking) !== getBookingServiceDateKey(filteredBookings[index - 1]);
+                const agentName = getAgentName(booking);
+                const totalUnits = booking.items.reduce((sum, item) => sum + (item.cantidad || 0), 0);
+                const paymentBadgeClass = booking.reembolso_realizado
+                  ? 'bg-red-100 text-red-700'
+                  : booking.pago_realizado
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-amber-100 text-amber-700';
+                const paymentBadgeLabel = booking.reembolso_realizado
+                  ? 'Reembolsado'
+                  : booking.pago_realizado
+                    ? 'Pagado'
+                    : 'Pend. pago';
+
+                return (
+                  <div key={booking.id}>
+                    {isFirstOfDateGroup && (
+                      <div className={clsx('px-5 py-2 border-t border-slate-200 bg-slate-50/80', index === 0 && 'border-t-0')}>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {getBookingSectionLabel(booking)}
+                        </p>
+                      </div>
                     )}
-                  >
-                    <td className="px-6 py-4">
-                      <span className="font-mono text-sm font-medium text-gray-900">{booking.numero_reserva}</span>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {format(getDate(booking.creado_en), 'dd MMM yyyy', { locale: es })}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="font-medium text-gray-900">{booking.cliente.nombre}</div>
-                      <div className="text-sm text-gray-500">{booking.cliente.email}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <div className={clsx(
-                          "p-1.5 rounded-lg",
-                          getAgentType(booking) === 'Broker' ? "bg-orange-100 text-orange-600" :
-                          getAgentType(booking) === 'Agencia' ? "bg-purple-100 text-purple-600" :
-                          "bg-gray-100 text-gray-600"
-                        )}>
-                          {getAgentType(booking) === 'Broker' || getAgentType(booking) === 'Agencia' ? 
-                            <Briefcase size={14} /> : <UserIcon size={14} />}
+                    <article
+                      className={clsx(
+                        'px-5 py-3 border-t border-slate-200',
+                        isFirstOfDateGroup && 'border-t-0',
+                        isToday && 'bg-blue-50/40'
+                      )}
+                    >
+                      <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1.8fr_auto] gap-3 items-start">
+                        <div className="min-w-0 space-y-1">
+                          <p className="font-mono text-lg leading-tight text-slate-900 break-words">{booking.numero_reserva}</p>
+                          <p className="text-sm text-slate-500">{formatBookingServiceDateRange(booking)}</p>
+                          <p className="text-xs text-slate-400">
+                            Creada: {format(getDate(booking.creado_en), 'dd MMM yyyy', { locale: es })}
+                          </p>
+                          {isToday && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5">
+                              Hoy
+                            </span>
+                          )}
                         </div>
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">{getAgentName(booking)}</div>
-                          <div className="text-xs text-gray-500">{getAgentType(booking)}</div>
+
+                        <div className="min-w-0 space-y-1.5">
+                          <p className="text-lg leading-tight font-semibold text-slate-900 truncate">{booking.cliente.nombre}</p>
+                          <p className="text-sm text-slate-500 truncate">{booking.cliente.email}</p>
+                          <div className="text-sm text-slate-700">{formatBookingServiceDateRange(booking)}</div>
+                          <div className="text-sm text-slate-500 truncate">
+                            {getLocationLabel(booking)}{booking.hora_entrega ? ` · ${booking.hora_entrega}` : ''}
+                          </div>
+                          <div className="text-sm text-slate-500 truncate">
+                            {agentName} · {totalUnits} uds
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col gap-1 text-sm">
-                        <span className="text-gray-900">
-                          {format(parseISO(booking.fecha_inicio), 'dd MMM', { locale: es })}
-                        </span>
-                        <span className="text-gray-400 text-xs">hasta</span>
-                        <span className="text-gray-900">
-                          {format(parseISO(booking.fecha_fin), 'dd MMM', { locale: es })}
-                        </span>
-                        {isToday && (
-                          <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 w-fit">
-                            Hoy
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="space-y-2 text-sm text-gray-700">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-gray-900">{getLocationLabel(booking)}</span>
-                          <button
-                            onClick={() => copyText(getDeliverySummary(booking), 'Entrega')}
-                            className="btn-icon text-slate-400 hover:text-blue-600 hover:bg-blue-50"
-                            title="Copiar entrega"
-                          >
-                            <Copy size={16} />
-                          </button>
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {booking.hora_entrega ? `Hora: ${booking.hora_entrega}` : 'Hora: no indicada'}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {booking.nombre_barco ? `Barco: ${booking.nombre_barco}` : 'Barco: no indicado'}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          {booking.numero_amarre ? `Amarre: ${booking.numero_amarre}` : 'Amarre: no indicado'}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="space-y-2">
-                        {booking.items.slice(0, 2).map((item, idx) => (
-                          <div key={idx} className="text-sm text-gray-700 flex items-center gap-2">
-                            <span className="bg-gray-100 px-1.5 py-0.5 rounded text-xs font-mono font-medium">x{item.cantidad}</span>
-                            <span className="truncate max-w-[160px]" title={products[item.producto_id]?.nombre}>
-                              {products[item.producto_id]?.nombre || 'Producto desconocido'}
+
+                        <div className="min-w-[230px] space-y-2 lg:text-right">
+                          <div className="flex lg:justify-end items-center gap-2">
+                            <span
+                              className={clsx(
+                                'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border',
+                                getStatusColor(booking.estado)
+                              )}
+                            >
+                              {getStatusIcon(booking.estado)}
+                              <span className="capitalize">{booking.estado}</span>
+                            </span>
+                            <span className={clsx('inline-flex rounded-full px-2 py-0.5 text-xs font-semibold', paymentBadgeClass)}>
+                              {paymentBadgeLabel}
                             </span>
                           </div>
-                        ))}
-                        {booking.items.length > 2 && (
-                          <span className="text-xs text-gray-400">+{booking.items.length - 2} más</span>
-                        )}
-                        <button
-                          onClick={() => copyText(getProductsSummary(booking), 'Productos')}
-                          className="btn-ghost text-xs text-blue-700"
-                        >
-                          <Copy size={14} />
-                          Copiar productos
-                        </button>
+
+                          <div>
+                            <p className="text-2xl font-semibold text-slate-900">
+                              €{booking.precio_total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+
+                          <div className="flex flex-wrap gap-1.5 lg:justify-end">
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setViewingBooking(booking);
+                              }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              <Eye size={14} />
+                              Detalles
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setPaymentManaging(booking);
+                              }}
+                              className={clsx(
+                                'inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold',
+                                booking.pago_realizado
+                                  ? 'border border-green-200 text-green-700 hover:bg-green-50'
+                                  : 'bg-blue-700 text-white hover:bg-blue-800'
+                              )}
+                            >
+                              <CreditCard size={14} />
+                              {booking.pago_realizado ? 'Pago' : 'Cobrar'}
+                            </button>
+                            <button
+                              onClick={() => copyContractLink(booking)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            >
+                              <Share2 size={14} />
+                              Contrato
+                            </button>
+                            {booking.estado !== 'cancelada' && booking.estado !== 'expirada' && (
+                              <button
+                                onClick={() => handleCancelBooking(booking)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-2 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                              >
+                                <Ban size={14} />
+                                Cancelar
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={clsx(
-                        "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border",
-                        getStatusColor(booking.estado)
-                      )}>
-                        {getStatusIcon(booking.estado)}
-                        <span className="capitalize">{booking.estado}</span>
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      {booking.acuerdo_firmado ? (
-                        <div className="flex items-center gap-2">
-                          <div className="bg-green-100 p-1.5 rounded-lg">
-                            <PenTool size={14} className="text-green-600" />
-                          </div>
-                          <div>
-                            <div className="text-xs font-medium text-green-700">Firmado</div>
-                            {booking.terminos_aceptados_en && (
-                              <div className="text-xs text-gray-500">
-                                {format(getDate(booking.terminos_aceptados_en), 'dd MMM', { locale: es })}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <div className="bg-gray-100 p-1.5 rounded-lg">
-                            <PenTool size={14} className="text-gray-400" />
-                          </div>
-                          <span className="text-xs text-gray-500">Pendiente</span>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      {booking.reembolso_realizado ? (
-                        <div className="flex items-center gap-2">
-                          <div className="bg-red-100 p-1.5 rounded-lg">
-                            <XCircle size={14} className="text-red-600" />
-                          </div>
-                          <div>
-                            <div className="text-xs font-medium text-red-700">Reembolsado</div>
-                            {booking.reembolso_fecha && (
-                              <div className="text-xs text-gray-500">
-                                {format(getDate(booking.reembolso_fecha), 'dd MMM', { locale: es })}
-                              </div>
-                            )}
-                            {booking.reembolso_monto && (
-                              <div className="text-xs text-red-600 font-semibold">
-                                €{booking.reembolso_monto.toFixed(0)}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ) : booking.pago_realizado ? (
-                        <div className="flex items-center gap-2">
-                          <div className="bg-green-100 p-1.5 rounded-lg">
-                            <CheckCircle2 size={14} className="text-green-600" />
-                          </div>
-                          <div>
-                            <div className="text-xs font-medium text-green-700">Pagado</div>
-                            {booking.pago_realizado_en && (
-                              <div className="text-xs text-gray-500">
-                                {format(getDate(booking.pago_realizado_en), 'dd MMM', { locale: es })}
-                              </div>
-                            )}
-                            {booking.pago_metodo && (
-                              <div className="text-xs text-green-600 capitalize">
-                                {booking.pago_metodo}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <div className="bg-orange-100 p-1.5 rounded-lg">
-                            <Clock size={14} className="text-orange-600" />
-                          </div>
-                          <span className="text-xs text-orange-700 font-medium">Pendiente</span>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      €{booking.precio_total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button 
-                          onClick={() => copyContractLink(booking)}
-                          className="btn-icon text-slate-400 hover:text-emerald-600 hover:bg-emerald-50"
-                          title="Copiar enlace del contrato"
-                        >
-                          <Share2 size={18} />
-                        </button>
-                        <button 
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setViewingBooking(booking);
-                          }}
-                          className="btn-icon text-slate-400 hover:text-blue-600 hover:bg-blue-50" 
-                          title="Ver detalles"
-                        >
-                          <Eye size={18} />
-                        </button>
-                        <button 
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setPaymentManaging(booking);
-                          }}
-                          className={clsx(
-                            "btn-icon",
-                            booking.pago_realizado 
-                              ? "text-green-600 hover:text-green-700 hover:bg-green-50" 
-                              : "text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                          )}
-                          title={booking.pago_realizado ? "Gestionar pago" : "Registrar pago"}
-                        >
-                          <CreditCard size={18} />
-                        </button>
-                        {booking.estado !== 'cancelada' && booking.estado !== 'expirada' && (
-                          <button 
-                            onClick={() => handleCancelBooking(booking)}
-                            className="btn-icon text-slate-400 hover:text-orange-600 hover:bg-orange-50" 
-                            title="Cancelar reserva"
-                          >
-                            <Ban size={18} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                )})}
-              </tbody>
-            </table>
+                    </article>
+                  </div>
+                );
+              })}
             </div>
           </>
         ) : (
@@ -1044,17 +1123,13 @@ export default function BookingsPage() {
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-1">No hay reservas encontradas</h3>
             <p className="text-gray-500 max-w-sm mx-auto mb-6">
-              {searchTerm || statusFilter !== 'all' || timeFilter !== 'today'
+              {hasActiveFilters
                 ? 'Intenta ajustar los filtros o términos de búsqueda.' 
-                : 'No hay reservas para hoy.'}
+                : 'No hay reservas registradas.'}
             </p>
-            {(searchTerm || statusFilter !== 'all' || timeFilter !== 'today') && (
+            {hasActiveFilters && (
               <button 
-                onClick={() => {
-                  setSearchTerm('');
-                  setStatusFilter('all');
-                  setTimeFilter('today');
-                }}
+                onClick={resetFilters}
                 className="btn-ghost text-blue-700"
               >
                 Limpiar filtros
@@ -1108,15 +1183,20 @@ function BookingDetailsModal({
   users: Record<string, User>;
   onClose: () => void;
 }) {
-  const getDate = (timestamp: any): Date => {
+  const getDate = (timestamp: unknown): Date => {
     if (!timestamp) return new Date();
-    if (timestamp && typeof timestamp.toDate === 'function') {
-      return timestamp.toDate();
+    if (
+      typeof timestamp === 'object' &&
+      timestamp !== null &&
+      'toDate' in timestamp &&
+      typeof (timestamp as { toDate?: () => Date }).toDate === 'function'
+    ) {
+      return (timestamp as { toDate: () => Date }).toDate();
     }
     if (timestamp instanceof Date) {
       return timestamp;
     }
-    const date = new Date(timestamp);
+    const date = new Date(timestamp as string | number);
     if (isNaN(date.getTime())) {
       return new Date();
     }
@@ -1149,6 +1229,33 @@ function BookingDetailsModal({
       return users[booking.creado_por].rol === 'admin' ? 'Admin' : 'Usuario';
     }
     return 'Directo';
+  };
+
+  const deliveryLocationLabel =
+    booking.ubicacion_entrega === 'marina_ibiza'
+      ? 'Marina Ibiza'
+      : booking.ubicacion_entrega === 'marina_botafoch'
+        ? 'Marina Botafoch'
+        : booking.ubicacion_entrega === 'club_nautico'
+          ? 'Club Náutico'
+          : booking.ubicacion_entrega || 'No indicado';
+
+  const copyDatesAndDelivery = async () => {
+    const text = [
+      `Fecha inicio: ${format(parseISO(booking.fecha_inicio), 'dd MMM yyyy', { locale: es })}`,
+      `Fecha fin: ${format(parseISO(booking.fecha_fin), 'dd MMM yyyy', { locale: es })}`,
+      `Ubicación: ${deliveryLocationLabel}`,
+      `Hora entrega: ${booking.hora_entrega || 'No indicada'}`,
+      `Barco: ${booking.nombre_barco || 'No indicado'}`,
+      `Amarre: ${booking.numero_amarre || 'No indicado'}`,
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Fechas y entrega copiadas.');
+    } catch {
+      alert('No se pudo copiar automáticamente.');
+    }
   };
 
   return (
@@ -1219,10 +1326,21 @@ function BookingDetailsModal({
 
           {/* Dates & Delivery */}
           <section>
-            <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-              <Calendar size={20} className="text-blue-600" />
-              Fechas y Entrega
-            </h3>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <Calendar size={20} className="text-blue-600" />
+                Fechas y Entrega
+              </h3>
+              <button
+                type="button"
+                onClick={copyDatesAndDelivery}
+                className="btn-outline text-xs"
+                title="Copiar fechas y entrega"
+              >
+                <Copy size={14} />
+                Copiar
+              </button>
+            </div>
             <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-2 gap-4">
               <div>
                 <span className="text-xs text-gray-500 uppercase font-semibold">Fecha Inicio</span>
@@ -1235,11 +1353,7 @@ function BookingDetailsModal({
               {booking.ubicacion_entrega && (
                 <div>
                   <span className="text-xs text-gray-500 uppercase font-semibold">Ubicación</span>
-                  <div className="text-gray-900 font-medium">
-                    {booking.ubicacion_entrega === 'marina_ibiza' ? 'Marina Ibiza' : 
-                     booking.ubicacion_entrega === 'marina_botafoch' ? 'Marina Botafoch' : 
-                     booking.ubicacion_entrega === 'club_nautico' ? 'Club Náutico' : 'Otro'}
-                  </div>
+                  <div className="text-gray-900 font-medium">{deliveryLocationLabel}</div>
                 </div>
               )}
               {booking.hora_entrega && (

@@ -2,8 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
+  AlertTriangle,
+  Building2,
+  CalendarClock,
   CreditCard,
   Euro,
   Receipt,
@@ -14,7 +18,7 @@ import {
 } from 'lucide-react';
 import { db } from '@/lib/firebase/config';
 import { useAuthStore } from '@/store/authStore';
-import type { Booking, PaymentMethod } from '@/types';
+import type { Booking, PaymentMethod, User } from '@/types';
 
 type MethodTotals = Record<PaymentMethod, { count: number; amount: number }>;
 
@@ -49,10 +53,21 @@ const formatDate = (value: unknown) =>
     year: 'numeric',
   }).format(getDate(value));
 
+const toDateInputValue = (value: unknown) => {
+  const date = getDate(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export default function FinanzasPage() {
   const { user } = useAuthStore();
   const router = useRouter();
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [users, setUsers] = useState<Record<string, User>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -62,7 +77,7 @@ export default function FinanzasPage() {
       return;
     }
 
-    const unsubscribe = onSnapshot(
+    const unsubscribeBookings = onSnapshot(
       collection(db, 'bookings'),
       (snapshot) => {
         const data = snapshot.docs.map((doc) => ({
@@ -78,7 +93,24 @@ export default function FinanzasPage() {
       }
     );
 
-    return () => unsubscribe();
+    const unsubscribeUsers = onSnapshot(
+      collection(db, 'users'),
+      (snapshot) => {
+        const map: Record<string, User> = {};
+        snapshot.docs.forEach((doc) => {
+          map[doc.id] = { id: doc.id, ...doc.data() } as User;
+        });
+        setUsers(map);
+      },
+      (error) => {
+        console.error('Error fetching users for finances:', error);
+      }
+    );
+
+    return () => {
+      unsubscribeBookings();
+      unsubscribeUsers();
+    };
   }, [router, user]);
 
   const finance = useMemo(() => {
@@ -102,6 +134,48 @@ export default function FinanzasPage() {
     let pendingAmount = 0;
     let commissionPending = 0;
     const pendingBookings: Booking[] = [];
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const getOwnerInfo = (booking: Booking) => {
+      const partnerId = booking.broker_id || booking.agency_id || booking.colaborador_id;
+      const partner = partnerId ? users[partnerId] : undefined;
+      const ownerName = partner?.empresa_nombre || partner?.nombre || 'SEABOB Center Ibiza';
+      const ownerType = booking.broker_id
+        ? 'Broker'
+        : booking.agency_id
+          ? 'Agencia'
+          : booking.colaborador_id
+            ? 'Colaborador'
+            : 'Directo';
+
+      return { ownerName, ownerType };
+    };
+
+    const overdueUnpaid = bookings
+      .filter((booking) => !booking.pago_realizado && booking.estado !== 'cancelada')
+      .map((booking) => {
+        const dueDate = getDate(booking.fecha_inicio);
+        dueDate.setHours(0, 0, 0, 0);
+        const daysOverdue = Math.floor((startOfToday.getTime() - dueDate.getTime()) / DAY_MS);
+        const { ownerName, ownerType } = getOwnerInfo(booking);
+
+        return {
+          booking,
+          dueDate,
+          daysOverdue,
+          ownerName,
+          ownerType,
+        };
+      })
+      .filter((item) => item.daysOverdue > 0)
+      .sort((a, b) => {
+        if (b.daysOverdue !== a.daysOverdue) return b.daysOverdue - a.daysOverdue;
+        return (b.booking.precio_total || 0) - (a.booking.precio_total || 0);
+      });
+
+    const recentOverdue = overdueUnpaid.filter((item) => item.daysOverdue <= 3);
+    const longOverdue = overdueUnpaid.filter((item) => item.daysOverdue > 3);
 
     bookings.forEach((booking) => {
       const total = booking.precio_total || 0;
@@ -159,8 +233,18 @@ export default function FinanzasPage() {
       methodTotals,
       channelTotals,
       pendingBookings: pendingBookings.slice(0, 5),
+      unpaidTracker: {
+        totalCount: overdueUnpaid.length,
+        totalAmount: overdueUnpaid.reduce((sum, item) => sum + (item.booking.precio_total || 0), 0),
+        recentCount: recentOverdue.length,
+        recentAmount: recentOverdue.reduce((sum, item) => sum + (item.booking.precio_total || 0), 0),
+        longCount: longOverdue.length,
+        longAmount: longOverdue.reduce((sum, item) => sum + (item.booking.precio_total || 0), 0),
+        recentItems: recentOverdue,
+        longItems: longOverdue,
+      },
     };
-  }, [bookings]);
+  }, [bookings, users]);
 
   if (!user) return null;
 
@@ -400,6 +484,137 @@ export default function FinanzasPage() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-5">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Control de impagos vencidos</h2>
+            <p className="text-sm text-slate-500">
+              Solo reservas no pagadas con fecha de servicio ya vencida.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="uppercase tracking-wide text-slate-500 font-semibold">Total vencidas</p>
+              <p className="font-bold text-slate-900 mt-1">
+                {finance.unpaidTracker.totalCount} · {formatCurrency(finance.unpaidTracker.totalAmount)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <p className="uppercase tracking-wide text-amber-700 font-semibold">Ultimos 3 dias</p>
+              <p className="font-bold text-amber-800 mt-1">
+                {finance.unpaidTracker.recentCount} · {formatCurrency(finance.unpaidTracker.recentAmount)}
+              </p>
+            </div>
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+              <p className="uppercase tracking-wide text-rose-700 font-semibold">Mas de 3 dias</p>
+              <p className="font-bold text-rose-800 mt-1">
+                {finance.unpaidTracker.longCount} · {formatCurrency(finance.unpaidTracker.longAmount)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {finance.unpaidTracker.totalCount === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+            No hay impagos vencidos actualmente.
+          </div>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-rose-100 bg-rose-50/40 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <AlertTriangle size={16} className="text-rose-600" />
+                <h3 className="text-sm font-bold text-rose-900">Vencidas hace mas de 3 dias</h3>
+              </div>
+              {finance.unpaidTracker.longItems.length === 0 ? (
+                <p className="text-sm text-slate-500">Sin reservas en este tramo.</p>
+              ) : (
+                <div className="space-y-2">
+                  {finance.unpaidTracker.longItems.map((item) => (
+                    <div key={item.booking.id} className="rounded-lg border border-rose-100 bg-white px-3 py-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {item.booking.numero_reserva} · {item.booking.cliente?.nombre || 'Cliente'}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {item.booking.cliente?.email || 'Sin email'}
+                          </p>
+                          <p className="text-xs text-slate-600 mt-1 inline-flex items-center gap-1">
+                            <Building2 size={12} />
+                            {item.ownerName} · {item.ownerType}
+                          </p>
+                          <p className="text-xs text-rose-700 mt-1 inline-flex items-center gap-1">
+                            <CalendarClock size={12} />
+                            Vence: {formatDate(item.dueDate)} · {item.daysOverdue} dias
+                          </p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-sm font-bold text-rose-700">
+                            {formatCurrency(item.booking.precio_total || 0)}
+                          </p>
+                          <Link
+                            href={`/admin/reservas?bookingRef=${encodeURIComponent(item.booking.numero_reserva)}&serviceDate=${toDateInputValue(item.booking.fecha_inicio)}`}
+                            className="mt-1 inline-flex text-xs font-semibold text-blue-700 hover:text-blue-800 underline underline-offset-2"
+                          >
+                            Ver reserva
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <CalendarClock size={16} className="text-amber-600" />
+                <h3 className="text-sm font-bold text-amber-900">Vencidas en los ultimos 3 dias</h3>
+              </div>
+              {finance.unpaidTracker.recentItems.length === 0 ? (
+                <p className="text-sm text-slate-500">Sin reservas en este tramo.</p>
+              ) : (
+                <div className="space-y-2">
+                  {finance.unpaidTracker.recentItems.map((item) => (
+                    <div key={item.booking.id} className="rounded-lg border border-amber-100 bg-white px-3 py-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {item.booking.numero_reserva} · {item.booking.cliente?.nombre || 'Cliente'}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            {item.booking.cliente?.email || 'Sin email'}
+                          </p>
+                          <p className="text-xs text-slate-600 mt-1 inline-flex items-center gap-1">
+                            <Building2 size={12} />
+                            {item.ownerName} · {item.ownerType}
+                          </p>
+                          <p className="text-xs text-amber-700 mt-1 inline-flex items-center gap-1">
+                            <CalendarClock size={12} />
+                            Vence: {formatDate(item.dueDate)} · {item.daysOverdue} dias
+                          </p>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-sm font-bold text-amber-700">
+                            {formatCurrency(item.booking.precio_total || 0)}
+                          </p>
+                          <Link
+                            href={`/admin/reservas?bookingRef=${encodeURIComponent(item.booking.numero_reserva)}&serviceDate=${toDateInputValue(item.booking.fecha_inicio)}`}
+                            className="mt-1 inline-flex text-xs font-semibold text-blue-700 hover:text-blue-800 underline underline-offset-2"
+                          >
+                            Ver reserva
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

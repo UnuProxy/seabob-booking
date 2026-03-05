@@ -106,7 +106,26 @@ export async function POST(request: NextRequest) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        
+        const isManualRemotePayment = session.metadata?.payment_type === 'manual_remote';
+        if (isManualRemotePayment) {
+          await adminDb
+            .collection('remote_payment_links')
+            .doc(session.id)
+            .set(
+              {
+                status: 'paid',
+                paid_at: FieldValue.serverTimestamp(),
+                payment_intent_id: session.payment_intent?.toString() || null,
+                amount_paid: session.amount_total ? session.amount_total / 100 : null,
+                currency: session.currency || 'eur',
+              },
+              { merge: true }
+            );
+
+          console.log(`✅ Remote payment link paid: ${session.id}`);
+          break;
+        }
+
         // Get booking ID from metadata
         const bookingId = session.metadata?.booking_id;
         if (!bookingId) {

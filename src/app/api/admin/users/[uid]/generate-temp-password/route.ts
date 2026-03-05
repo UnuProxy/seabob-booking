@@ -4,6 +4,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminAuth, getAdminDb } from '@/lib/firebase/admin';
 
 export const runtime = 'nodejs';
+const RESETTABLE_ROLES = ['admin', 'colaborador', 'delivery', 'broker', 'agency'] as const;
 
 function generateTempPassword(length = 10) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -57,8 +58,9 @@ export async function POST(
 
   const user = (userSnap.data() || {}) as Record<string, unknown>;
   const rol = user.rol;
-  if (rol !== 'broker' && rol !== 'agency') {
-    return NextResponse.json({ error: 'Only brokers/agencies are supported.' }, { status: 400 });
+  const isResettableRole = typeof rol === 'string' && RESETTABLE_ROLES.includes(rol as (typeof RESETTABLE_ROLES)[number]);
+  if (!isResettableRole) {
+    return NextResponse.json({ error: 'Unsupported user role for password reset.' }, { status: 400 });
   }
 
   const email = user.email;
@@ -82,15 +84,16 @@ export async function POST(
     return NextResponse.json({ error: 'Could not update password.' }, { status: 500 });
   }
 
-  await userRef.set(
-    {
-      requires_password_change: true,
-      invite_status: 'generated',
-      temp_password_last_generated_at: FieldValue.serverTimestamp(),
-      temp_password_last_generated_by: admin.uid,
-    },
-    { merge: true }
-  );
+  const userUpdate: Record<string, unknown> = {
+    requires_password_change: true,
+    temp_password_last_generated_at: FieldValue.serverTimestamp(),
+    temp_password_last_generated_by: admin.uid,
+  };
+  if (rol === 'broker' || rol === 'agency') {
+    userUpdate.invite_status = 'generated';
+  }
+
+  await userRef.set(userUpdate, { merge: true });
 
   const loginUrl = `${req.nextUrl.origin}/login`;
 

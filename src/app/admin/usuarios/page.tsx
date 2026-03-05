@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, query, orderBy, doc, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
+import { auth, db } from '@/lib/firebase/config';
 import type { Booking, User } from '@/types';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
-import { AlertTriangle, CheckCircle2, Search, ShieldAlert, Trash2, UserPlus, X, RefreshCcw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, KeyRound, Search, ShieldAlert, Trash2, UserPlus, X, RefreshCcw } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { initializeApp, getApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -23,12 +23,22 @@ const getSafeDate = (value: any): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+type GeneratedAccess = {
+  userId: string;
+  userName: string;
+  username: string;
+  tempPassword: string;
+  loginUrl: string;
+};
+
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [resettingId, setResettingId] = useState<string | null>(null);
+  const [generatedAccess, setGeneratedAccess] = useState<GeneratedAccess | null>(null);
   const { user: currentUser } = useAuthStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -143,7 +153,60 @@ export default function UsersPage() {
     }
   };
 
-  const renderTable = (usersList: User[], emptyMessage: string) => (
+  const handleGenerateTempPassword = async (target: User) => {
+    if (resettingId) return;
+    if (currentUser?.id === target.id) {
+      alert('No puedes regenerar tu propia contraseña desde esta pantalla.');
+      return;
+    }
+
+    const action = target.temp_password_last_generated_at ? 'Regenerar' : 'Generar';
+    const confirmed = confirm(
+      `${action} contraseña temporal para ${target.nombre || target.email}?\n\nLa contraseña actual dejará de funcionar.`
+    );
+    if (!confirmed) return;
+
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) {
+      alert('Sesión no válida. Vuelve a iniciar sesión.');
+      return;
+    }
+
+    try {
+      setResettingId(target.id);
+      const res = await fetch(`/api/admin/users/${target.id}/generate-temp-password`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const payload = (await res.json().catch(() => null)) as
+        | { error?: string; username?: string; tempPassword?: string; loginUrl?: string }
+        | null;
+      if (!res.ok) {
+        alert(payload?.error || 'No se pudo generar la contraseña temporal.');
+        return;
+      }
+
+      setGeneratedAccess({
+        userId: target.id,
+        userName: target.nombre || target.email || 'Usuario',
+        username: payload?.username || target.email || '',
+        tempPassword: payload?.tempPassword || '',
+        loginUrl: payload?.loginUrl || `${window.location.origin}/login`,
+      });
+    } catch (error) {
+      console.error('Error generating temp password:', error);
+      alert('Error al generar la contraseña temporal.');
+    } finally {
+      setResettingId(null);
+    }
+  };
+
+  const renderTable = (
+    usersList: User[],
+    emptyMessage: string,
+    options: { allowPasswordReset?: boolean } = {}
+  ) => (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
@@ -209,6 +272,30 @@ export default function UsersPage() {
                     <td className="px-6 py-4 text-slate-700 font-semibold">{bookingCount}</td>
                     <td className="px-6 py-4">{renderIssues(user)}</td>
                     <td className="px-6 py-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {options.allowPasswordReset && (
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateTempPassword(user)}
+                            disabled={resettingId === user.id || currentUser?.id === user.id}
+                            className={clsx(
+                              'inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-semibold transition',
+                              resettingId === user.id
+                                ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                                : currentUser?.id === user.id
+                                  ? 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
+                                  : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                            )}
+                            title={
+                              currentUser?.id === user.id
+                                ? 'No puedes regenerar tu propia contraseña desde esta pantalla'
+                                : 'Generar contraseña temporal'
+                            }
+                          >
+                            <KeyRound size={14} />
+                            {resettingId === user.id ? 'Generando...' : 'Reset clave'}
+                          </button>
+                        )}
                       <button
                         type="button"
                         onClick={() => handleDelete(user)}
@@ -226,6 +313,7 @@ export default function UsersPage() {
                         <Trash2 size={14} />
                         {deletingId === user.id ? 'Eliminando...' : 'Eliminar'}
                       </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -286,7 +374,9 @@ export default function UsersPage() {
             Administradores, colaboradores y equipo de entregas.
           </p>
         </div>
-        {renderTable(internalUsers, 'No hay usuarios internos que coincidan con la búsqueda.')}
+        {renderTable(internalUsers, 'No hay usuarios internos que coincidan con la búsqueda.', {
+          allowPasswordReset: true,
+        })}
       </div>
 
       <div className="space-y-4">
@@ -305,6 +395,78 @@ export default function UsersPage() {
           currentUserId={currentUser?.id}
         />
       )}
+
+      {generatedAccess && (
+        <GeneratedAccessModal
+          access={generatedAccess}
+          onClose={() => setGeneratedAccess(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function GeneratedAccessModal({
+  access,
+  onClose,
+}: {
+  access: GeneratedAccess;
+  onClose: () => void;
+}) {
+  const copyText = async () => {
+    const text = `Enlace: ${access.loginUrl}\nUsuario: ${access.username}\nContraseña temporal: ${access.tempPassword}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('Copiado al portapapeles.');
+    } catch {
+      alert('No se pudo copiar automáticamente. Copia manualmente desde la pantalla.');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl shrink-0">
+          <h2 className="text-xl font-bold text-gray-800">Contraseña temporal generada</h2>
+          <button onClick={onClose} className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-200">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4 overflow-y-auto">
+          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+            <p className="text-sm text-emerald-900 font-semibold">{access.userName}</p>
+            <p className="text-xs text-emerald-700 mt-1">
+              Debe cambiarla inmediatamente al iniciar sesión.
+            </p>
+          </div>
+
+          <div className="space-y-2 text-sm text-slate-700">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <p className="text-xs font-semibold text-slate-500">Enlace</p>
+              <p className="break-words">{access.loginUrl}</p>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <p className="text-xs font-semibold text-slate-500">Usuario (email)</p>
+              <p className="break-words font-medium">{access.username}</p>
+            </div>
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+              <p className="text-xs font-semibold text-amber-700">Contraseña temporal</p>
+              <p className="font-mono font-bold tracking-wider text-amber-900 text-base">{access.tempPassword}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 pt-0 flex flex-col sm:flex-row gap-3">
+          <button type="button" onClick={copyText} className="btn-outline flex-1">
+            <Copy size={16} />
+            Copiar datos
+          </button>
+          <button type="button" onClick={onClose} className="btn-primary flex-1">
+            Cerrar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
