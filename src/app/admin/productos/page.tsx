@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Product } from '@/types';
 import { collection, onSnapshot, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { SEASONAL_PRICE_MONTHS } from '@/lib/productPricing';
 import { Edit, Trash2 } from 'lucide-react';
 import { ProductForm } from '@/components/products/ProductForm';
 
@@ -111,6 +112,14 @@ export default function ProductsPage() {
               <div className="flex items-center justify-between mt-auto pt-4 border-t border-gray-100">
                 <div className="text-sm">
                   <div className="font-semibold text-gray-900">€{product.precio_diario} <span className="text-gray-500 font-normal">/ día</span></div>
+                  {SEASONAL_PRICE_MONTHS.some(({ key }) => product.precios_por_mes?.[key] !== undefined) && (
+                    <div className="mt-1 text-xs text-gray-500">
+                      {SEASONAL_PRICE_MONTHS
+                        .filter(({ key }) => product.precios_por_mes?.[key] !== undefined)
+                        .map(({ key, label }) => `${label}: €${product.precios_por_mes?.[key]}`)
+                        .join(' · ')}
+                    </div>
+                  )}
                   {product.precio_hora && product.precio_hora > 0 && (
                     <div className="text-gray-500">€{product.precio_hora} / hora</div>
                   )}

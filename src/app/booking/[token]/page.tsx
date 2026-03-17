@@ -15,6 +15,7 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { getProductDailyPrice } from '@/lib/productPricing';
 import { BookingItem, BookingLink, Product, User as AppUser } from '@/types';
 import { addDays, differenceInDays, format, eachDayOfInterval } from 'date-fns';
 import {
@@ -189,9 +190,9 @@ export default function PublicBookingPage() {
     return items.reduce((acc, item) => {
       const product = products.find((p) => p.id === item.producto_id);
       if (!product) return acc;
-      return acc + product.precio_diario * dayCount * item.cantidad;
+      return acc + getProductDailyPrice(product, startDate) * dayCount * item.cantidad;
     }, 0);
-  }, [items, products, dayCount]);
+  }, [items, products, dayCount, startDate]);
 
   const total = rentalTotal;
 
@@ -294,7 +295,7 @@ export default function PublicBookingPage() {
           precio_unitario:
             item.tipo_alquiler === 'hora'
               ? product?.precio_hora || 0
-              : product?.precio_diario || 0,
+              : getProductDailyPrice(product, startDate),
           comision_percent: product?.comision || 0,
           deposito_unitario: 0,
         };
@@ -315,7 +316,7 @@ export default function PublicBookingPage() {
           const start = new Date(startDate);
           const end = new Date(endDate);
           const days = Math.max(1, differenceInDays(end, start));
-          return product.precio_diario * days * item.cantidad;
+          return getProductDailyPrice(product, startDate) * days * item.cantidad;
         }
         return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
       };
@@ -748,7 +749,7 @@ export default function PublicBookingPage() {
                         </div>
                         <div className="flex-1">
                           <h3 className="font-semibold text-slate-900">{product.nombre}</h3>
-                          <p className="text-sm text-slate-500">€{product.precio_diario}/día</p>
+                          <p className="text-sm text-slate-500">€{getProductDailyPrice(product, startDate)}/día</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <button

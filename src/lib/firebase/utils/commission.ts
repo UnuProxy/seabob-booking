@@ -1,4 +1,5 @@
 import { BookingItem, Product } from '@/types';
+import { getProductDailyPrice } from '@/lib/productPricing';
 
 /**
  * Calculate total commission for a booking based on product commission rates
@@ -15,7 +16,7 @@ export function calculateBookingCommission(
     if (!product) return total;
 
     // Calculate item total price
-    const pricePerUnit = product.precio_diario;
+    const pricePerUnit = getProductDailyPrice(product);
     const itemTotal = pricePerUnit * item.cantidad * item.duracion;
 
     // Apply commission percentage

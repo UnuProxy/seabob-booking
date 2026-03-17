@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Product, ProductType } from '@/types';
 import { addDoc, collection, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { app, db, auth, storageBucketCandidates } from '@/lib/firebase/config';
+import { SEASONAL_PRICE_MONTHS } from '@/lib/productPricing';
 import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { ImageUp, X } from 'lucide-react';
 
@@ -45,6 +46,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
     nombre: '',
     descripcion: '',
     precio_diario: undefined,
+    precios_por_mes: {},
     comision: undefined,
     tipo: 'seabob',
     imagen_url: '',
@@ -67,6 +69,12 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
       const productData: Record<string, unknown> = {
         ...formData,
         precio_diario: Number(formData.precio_diario) || 0,
+        precios_por_mes: Object.fromEntries(
+          SEASONAL_PRICE_MONTHS.map(({ key }) => {
+            const value = formData.precios_por_mes?.[key];
+            return [key, value === undefined ? null : Number(value) || 0];
+          }).filter(([, value]) => value !== null)
+        ),
         deposito: 0,
         comision: Number(formData.comision) || 0,
         imagen_url: removeCurrentImage && !imageFile ? '' : formData.imagen_url || '',
@@ -257,6 +265,39 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
                 placeholder="0"
               />
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Precios por Mes (€ / día)
+              </label>
+              <p className="text-xs text-gray-500 mb-3">
+                Configura precios especiales de abril a octubre. Si un mes queda vacío, se usará el precio base por día.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {SEASONAL_PRICE_MONTHS.map(({ key, label }) => (
+                  <div key={key}>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={formData.precios_por_mes?.[key] ?? ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          precios_por_mes: {
+                            ...formData.precios_por_mes,
+                            [key]: e.target.value === '' ? undefined : Number(e.target.value),
+                          },
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                      placeholder={`Base: ${formData.precio_diario ?? 0}`}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div>

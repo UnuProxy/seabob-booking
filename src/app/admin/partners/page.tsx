@@ -114,7 +114,26 @@ function downloadAccessPdf(access: GeneratedAccess) {
   y += passCardH + 12;
 
   // Steps
-  const stepsH = Math.max(70, pageH - y - margin);
+  docPdf.setFont('helvetica', 'bold');
+  docPdf.setFontSize(9);
+  docPdf.setTextColor(15, 23, 42);
+  const steps = [
+    `1) Abre el enlace: ${access.loginUrl}`,
+    `2) Inicia sesión con el usuario: ${access.username}`,
+    `3) Usa la contraseña temporal y cámbiala al primer ingreso.`,
+  ];
+  docPdf.setFont('helvetica', 'normal');
+  docPdf.setFontSize(9);
+  docPdf.setTextColor(51, 65, 85);
+  const stepLines = steps.flatMap((s) => docPdf.splitTextToSize(s, contentW - 24) as string[]);
+  const stepLineH = 12;
+  const stepsH = Math.max(70, 46 + stepLines.length * stepLineH);
+
+  if (y + stepsH > pageH - margin) {
+    docPdf.addPage('a6', 'portrait');
+    y = margin;
+  }
+
   drawCard(y, stepsH);
   docPdf.setFont('helvetica', 'bold');
   docPdf.setFontSize(9);
@@ -123,16 +142,11 @@ function downloadAccessPdf(access: GeneratedAccess) {
   docPdf.setFont('helvetica', 'normal');
   docPdf.setFontSize(9);
   docPdf.setTextColor(51, 65, 85);
-  const steps = [
-    `1) Abre el enlace: ${access.loginUrl}`,
-    `2) Inicia sesión con el usuario: ${access.username}`,
-    `3) Usa la contraseña temporal y cámbiala al primer ingreso.`,
-  ];
-  const stepLines = steps.flatMap((s) => docPdf.splitTextToSize(s, contentW - 24) as string[]);
+
   let stepsY = y + 34;
-  stepLines.slice(0, 8).forEach((line) => {
+  stepLines.forEach((line) => {
     docPdf.text(line, margin + 12, stepsY);
-    stepsY += 12;
+    stepsY += stepLineH;
   });
 
   const datePart = new Date().toISOString().slice(0, 10);

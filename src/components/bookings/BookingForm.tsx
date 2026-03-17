@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { collection, getDocs, query, where, serverTimestamp, doc, getDoc, increment, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Product, BookingItem, RentalType, DailyStock, User as AppUser } from '@/types';
+import { getProductDailyPrice } from '@/lib/productPricing';
 import { useAuthStore } from '@/store/authStore';
 import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor, AlertCircle, PackageX } from 'lucide-react';
 import { addDays, format, differenceInDays, eachDayOfInterval } from 'date-fns';
@@ -176,7 +177,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       const days = Math.max(1, differenceInDays(end, start));
-      return product.precio_diario * days * item.cantidad;
+      return getProductDailyPrice(product, startDate) * days * item.cantidad;
     }
     return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
   };
@@ -243,7 +244,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
           precio_unitario:
             item.tipo_alquiler === 'hora'
               ? product?.precio_hora || 0
-              : product?.precio_diario || 0,
+              : getProductDailyPrice(product, startDate),
           comision_percent: product?.comision || 0, // Store commission rate at time of booking
           deposito_unitario: 0,
         };
@@ -876,7 +877,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                             const outOfStock = pStock?.isOutOfStock;
                             return (
                               <option key={p.id} value={p.id} disabled={outOfStock}>
-                                {p.nombre} - €{p.precio_diario}/día {outOfStock ? '(SIN STOCK)' : pStock ? `(${pStock.available} disp.)` : ''}
+                                {p.nombre} - €{getProductDailyPrice(p, startDate)}/día {outOfStock ? '(SIN STOCK)' : pStock ? `(${pStock.available} disp.)` : ''}
                               </option>
                             );
                           })}

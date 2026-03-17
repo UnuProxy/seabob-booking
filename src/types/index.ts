@@ -3,6 +3,14 @@ export type EntityType = 'individual' | 'broker' | 'agency';
 export type ProductType = 'seabob' | 'jetski' | 'servicio';
 export type RentalType = 'hora' | 'dia';
 export type BookingStatus = 'pendiente' | 'confirmada' | 'completada' | 'cancelada' | 'expirada';
+export type SeasonalPriceMonth =
+  | 'april'
+  | 'may'
+  | 'june'
+  | 'july'
+  | 'august'
+  | 'september'
+  | 'october';
 
 export type PaymentMethod = 
   | 'stripe'          // Stripe payment
@@ -43,6 +51,7 @@ export interface Product {
   nombre: string;
   descripcion: string;
   precio_diario: number;
+  precios_por_mes?: Partial<Record<SeasonalPriceMonth, number>>;
   precio_hora?: number; // Optional hourly rate
   deposito?: number; // Refundable deposit amount
   comision: number; // Percentage (e.g., 15 = 15%)
