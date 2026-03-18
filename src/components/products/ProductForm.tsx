@@ -47,12 +47,16 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
     descripcion: '',
     precio_diario: undefined,
     precios_por_mes: {},
+    incluir_iva: false,
     comision: undefined,
     tipo: 'seabob',
     imagen_url: '',
     activo: true,
     ...productToEdit,
   });
+  const firstConfiguredMonthlyPrice = SEASONAL_PRICE_MONTHS.map(({ key }) => formData.precios_por_mes?.[key]).find(
+    (value) => value !== undefined && value !== null && Number(value) > 0
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,10 +69,12 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
 
       const previousImageUrl = productToEdit?.imagen_url?.trim() || '';
       const shouldDeleteCurrentImage = Boolean(productToEdit?.id && previousImageUrl && (removeCurrentImage || imageFile));
+      const fallbackDailyPrice =
+        Number(firstConfiguredMonthlyPrice) || Number(productToEdit?.precio_diario) || 0;
 
       const productData: Record<string, unknown> = {
         ...formData,
-        precio_diario: Number(formData.precio_diario) || 0,
+        precio_diario: fallbackDailyPrice,
         precios_por_mes: Object.fromEntries(
           SEASONAL_PRICE_MONTHS.map(({ key }) => {
             const value = formData.precios_por_mes?.[key];
@@ -76,6 +82,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
           }).filter(([, value]) => value !== null)
         ),
         deposito: 0,
+        incluir_iva: Boolean(formData.incluir_iva),
         comision: Number(formData.comision) || 0,
         imagen_url: removeCurrentImage && !imageFile ? '' : formData.imagen_url || '',
         creado_por: auth.currentUser?.uid,
@@ -253,26 +260,30 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
               </select>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Precio por Día (€)</label>
+            <div className="flex items-start gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-3">
               <input
-                type="number"
-                min="0"
-                step="0.01"
-                required
-                value={formData.precio_diario ?? ''}
-                onChange={(e) => setFormData({ ...formData, precio_diario: e.target.value === '' ? undefined : Number(e.target.value) })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
-                placeholder="0"
+                id="incluir-iva"
+                type="checkbox"
+                checked={Boolean(formData.incluir_iva)}
+                onChange={(e) => setFormData({ ...formData, incluir_iva: e.target.checked })}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
+              <div>
+                <label htmlFor="incluir-iva" className="block text-sm font-medium text-gray-800">
+                  Incluir IVA (+21%) en este producto
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  Desactivado: sin IVA por defecto. Activado: los precios se muestran y se calculan con IVA incluido.
+                </p>
+              </div>
             </div>
 
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Precios por Mes (€ / día)
+                Precios por Mes (€ / día) sin IVA por defecto
               </label>
               <p className="text-xs text-gray-500 mb-3">
-                Configura precios especiales de abril a octubre. Si un mes queda vacío, se usará el precio base por día.
+                Solo introduces precios por mes. Todos se guardan sin IVA por defecto.
               </p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {SEASONAL_PRICE_MONTHS.map(({ key, label }) => (
@@ -281,7 +292,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
                     <input
                       type="number"
                       min="0"
-                      step="0.01"
+                      step="1"
                       value={formData.precios_por_mes?.[key] ?? ''}
                       onChange={(e) =>
                         setFormData({
@@ -293,8 +304,17 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
                         })
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
-                      placeholder={`Base: ${formData.precio_diario ?? 0}`}
+                      placeholder="0"
+                      inputMode="numeric"
                     />
+                    {formData.precios_por_mes?.[key] !== undefined && Number(formData.precios_por_mes?.[key]) > 0 && (
+                      <p className="text-xs font-medium text-emerald-700 mt-2">
+                        Con IVA (+21%): €
+                        {Math.round(Number(formData.precios_por_mes?.[key]) * 1.21).toLocaleString('es-ES', {
+                          maximumFractionDigits: 0,
+                        })}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

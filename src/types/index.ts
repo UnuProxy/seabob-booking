@@ -52,6 +52,7 @@ export interface Product {
   descripcion: string;
   precio_diario: number;
   precios_por_mes?: Partial<Record<SeasonalPriceMonth, number>>;
+  incluir_iva?: boolean;
   precio_hora?: number; // Optional hourly rate
   deposito?: number; // Refundable deposit amount
   comision: number; // Percentage (e.g., 15 = 15%)

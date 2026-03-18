@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Copy, ExternalLink } from 'lucide-react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import Link from 'next/link';
+import { Copy, ExternalLink, Package, X } from 'lucide-react';
+import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { auth } from '@/lib/firebase/config';
 import { useAuthStore } from '@/store/authStore';
-import { Booking } from '@/types';
+import { Booking, Product } from '@/types';
+import { getProductBaseDailyPrice, getProductDailyPrice } from '@/lib/productPricing';
 
 export default function DashboardPage() {
   const { user } = useAuthStore();
@@ -29,6 +31,11 @@ export default function DashboardPage() {
     refundedAmount: 0,
     commissionPending: 0,
   });
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  const formatPrice = (amount: number) =>
+    amount.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 
   useEffect(() => {
     if (!user) return;
@@ -120,6 +127,15 @@ export default function DashboardPage() {
 
     return () => unsubscribe();
   }, [user]);
+
+  useEffect(() => {
+    const productsQuery = query(collection(db, 'products'), orderBy('nombre'));
+    const unsubscribe = onSnapshot(productsQuery, (snapshot) => {
+      setProducts(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Product)));
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const formatCurrency = (amount: number) =>
     amount.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
@@ -296,6 +312,119 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center justify-between gap-3 mb-5">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-800">Productos</h2>
+            <p className="text-sm text-gray-600">
+              Haz clic en un producto para ver su ficha rápida y empezar una reserva.
+            </p>
+          </div>
+          <Link href="/admin/productos" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+            Ver inventario
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {products.map((product) => (
+            <button
+              key={product.id}
+              type="button"
+              onClick={() => setSelectedProduct(product)}
+              className="overflow-hidden rounded-2xl border border-gray-200 bg-white text-left transition-shadow hover:shadow-md"
+            >
+              <div className="h-40 bg-slate-100">
+                {product.imagen_url ? (
+                  <img src={product.imagen_url} alt={product.nombre} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-slate-400">
+                    <Package size={30} />
+                  </div>
+                )}
+              </div>
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900">{product.nombre}</h3>
+                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{product.tipo}</p>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${product.activo ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
+                    {product.activo ? 'Activo' : 'Inactivo'}
+                  </span>
+                </div>
+                <p className="mt-3 line-clamp-2 text-sm text-slate-600">{product.descripcion || 'Sin descripción.'}</p>
+                <div className="mt-4 flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-2xl font-bold text-slate-900">{formatPrice(getProductBaseDailyPrice(product))}</p>
+                    <p className="text-xs text-slate-500">Precio sin IVA</p>
+                    <p className="mt-2 text-sm font-semibold text-emerald-700">
+                      Total: {formatPrice(getProductDailyPrice(product))}
+                    </p>
+                  </div>
+                  <span className="text-sm font-medium text-blue-600">Ver info</span>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {selectedProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h3 className="text-xl font-semibold text-slate-900">{selectedProduct.nombre}</h3>
+                <p className="text-sm text-slate-500">{selectedProduct.tipo}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedProduct(null)} className="btn-icon text-slate-500 hover:bg-slate-100">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="grid gap-6 p-6 md:grid-cols-[1.1fr_0.9fr]">
+              <div className="min-h-64 overflow-hidden rounded-2xl bg-slate-100">
+                {selectedProduct.imagen_url ? (
+                  <img src={selectedProduct.imagen_url} alt={selectedProduct.nombre} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-slate-400">
+                    <Package size={36} />
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col">
+                <p className="text-sm leading-6 text-slate-600">
+                  {selectedProduct.descripcion || 'Sin descripción disponible.'}
+                </p>
+                <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm text-slate-500">Precio estandar sin IVA por dia</p>
+                  <p className="mt-1 text-3xl font-bold text-slate-900">
+                    {formatPrice(getProductBaseDailyPrice(selectedProduct))}
+                  </p>
+                  <p className="mt-4 text-sm text-slate-500">Total con IVA por dia</p>
+                  <p className="mt-1 text-3xl font-bold text-emerald-700">
+                    {formatPrice(getProductDailyPrice(selectedProduct))}
+                  </p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    {selectedProduct.incluir_iva
+                      ? 'El total ya incluye IVA (+21%).'
+                      : 'Referencia visual del total con IVA (+21%).'}
+                  </p>
+                </div>
+                <div className="mt-auto pt-6">
+                  <Link
+                    href="/admin/reservas?new=true"
+                    className="btn-primary w-full justify-center"
+                    onClick={() => setSelectedProduct(null)}
+                  >
+                    Empezar reserva
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

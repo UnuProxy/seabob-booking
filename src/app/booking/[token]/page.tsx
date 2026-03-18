@@ -15,7 +15,7 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { getProductDailyPrice } from '@/lib/productPricing';
+import { getProductDailyPrice, getProductVatShortLabel } from '@/lib/productPricing';
 import { BookingItem, BookingLink, Product, User as AppUser } from '@/types';
 import { addDays, differenceInDays, format, eachDayOfInterval } from 'date-fns';
 import {
@@ -38,6 +38,7 @@ import {
 export default function PublicBookingPage() {
   const params = useParams();
   const token = params?.token as string;
+  const formatPrice = (amount: number) => amount.toLocaleString('es-ES', { maximumFractionDigits: 0 });
 
   const [link, setLink] = useState<BookingLink | null>(null);
   const [creatorUser, setCreatorUser] = useState<AppUser | null>(null);
@@ -749,7 +750,10 @@ export default function PublicBookingPage() {
                         </div>
                         <div className="flex-1">
                           <h3 className="font-semibold text-slate-900">{product.nombre}</h3>
-                          <p className="text-sm text-slate-500">€{getProductDailyPrice(product, startDate)}/día</p>
+                          <p className="text-sm text-slate-500">€{formatPrice(getProductDailyPrice(product, startDate))}/día</p>
+                          <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-1">
+                            {getProductVatShortLabel(product)}
+                          </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <button
@@ -914,11 +918,14 @@ export default function PublicBookingPage() {
               <div>
                 <p className="text-sm text-slate-500">Total estimado</p>
                 <div className="text-3xl font-bold text-slate-900">
-                  €{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                  €{formatPrice(total)}
                 </div>
                 <div className="text-xs text-slate-500 mt-2 space-y-1">
-                  <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
+                  <div>Alquiler: €{formatPrice(rentalTotal)}</div>
                 </div>
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-2">
+                  Los precios se muestran sin IVA por defecto. Si un producto lleva IVA, se indica como IVA incluido (+21%).
+                </p>
                 <p className="text-xs text-slate-400 mt-1">
                   Precio sujeto a disponibilidad y confirmación final.
                 </p>

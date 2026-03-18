@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { collection, getDocs, query, where, serverTimestamp, doc, getDoc, increment, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Product, BookingItem, RentalType, DailyStock, User as AppUser } from '@/types';
-import { getProductDailyPrice } from '@/lib/productPricing';
+import { getProductDailyPrice, getProductVatShortLabel } from '@/lib/productPricing';
 import { useAuthStore } from '@/store/authStore';
 import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor, AlertCircle, PackageX } from 'lucide-react';
 import { addDays, format, differenceInDays, eachDayOfInterval } from 'date-fns';
@@ -16,6 +16,7 @@ interface BookingFormProps {
 
 export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const { user } = useAuthStore();
+  const formatPrice = (amount: number) => amount.toLocaleString('es-ES', { maximumFractionDigits: 0 });
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [partners, setPartners] = useState<AppUser[]>([]);
@@ -877,7 +878,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                             const outOfStock = pStock?.isOutOfStock;
                             return (
                               <option key={p.id} value={p.id} disabled={outOfStock}>
-                                {p.nombre} - €{getProductDailyPrice(p, startDate)}/día {outOfStock ? '(SIN STOCK)' : pStock ? `(${pStock.available} disp.)` : ''}
+                                {p.nombre} - €{formatPrice(getProductDailyPrice(p, startDate))}/día ({getProductVatShortLabel(p)}) {outOfStock ? '(SIN STOCK)' : pStock ? `(${pStock.available} disp.)` : ''}
                               </option>
                             );
                           })}
@@ -945,6 +946,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             <div className="text-xs text-gray-500 mt-1 space-y-1">
               <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
             </div>
+            <span className="text-xs text-amber-700 mt-2">
+              Los precios se muestran sin IVA por defecto. Si un producto lleva IVA, se indica como IVA incluido (+21%).
+            </span>
             <span className="text-3xl font-bold text-slate-900">€{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
           </div>
 

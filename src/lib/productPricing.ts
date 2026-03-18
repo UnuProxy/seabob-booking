@@ -1,5 +1,8 @@
 import type { Product, SeasonalPriceMonth } from '@/types';
 
+const VAT_RATE = 0.21;
+const VAT_PERCENT_LABEL = '+21%';
+
 export const SEASONAL_PRICE_MONTHS: Array<{
   key: SeasonalPriceMonth;
   label: string;
@@ -18,7 +21,7 @@ const seasonalMonthByIndex = new Map(
   SEASONAL_PRICE_MONTHS.map((month) => [month.monthIndex, month.key])
 );
 
-export function getProductDailyPrice(product: Product | undefined, dateLike?: Date | string): number {
+export function getProductBaseDailyPrice(product: Product | undefined, dateLike?: Date | string): number {
   if (!product) return 0;
   if (!dateLike) return Number(product.precio_diario) || 0;
 
@@ -34,4 +37,21 @@ export function getProductDailyPrice(product: Product | undefined, dateLike?: Da
 
   const seasonalPrice = product.precios_por_mes?.[seasonalMonth];
   return seasonalPrice !== undefined ? Number(seasonalPrice) || 0 : Number(product.precio_diario) || 0;
+}
+
+export function getProductDailyPrice(product: Product | undefined, dateLike?: Date | string): number {
+  const basePrice = getProductBaseDailyPrice(product, dateLike);
+  if (!product?.incluir_iva) return basePrice;
+  return Math.round(basePrice * (1 + VAT_RATE));
+}
+
+export function getProductVatLabel(product: Product | undefined): string {
+  if (!product) return `Sin IVA por defecto. Marca la casilla para incluir IVA (${VAT_PERCENT_LABEL}).`;
+  return product.incluir_iva
+    ? `IVA incluido (${VAT_PERCENT_LABEL})`
+    : `Sin IVA por defecto. Marca la casilla para incluir IVA (${VAT_PERCENT_LABEL}).`;
+}
+
+export function getProductVatShortLabel(product: Product | undefined): string {
+  return product?.incluir_iva ? `IVA incluido (${VAT_PERCENT_LABEL})` : 'Sin IVA por defecto';
 }
