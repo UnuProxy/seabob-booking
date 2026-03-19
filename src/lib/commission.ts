@@ -1,5 +1,6 @@
 import { differenceInDays } from 'date-fns';
 import type { Booking, Product } from '@/types';
+import { getProductDailyPrice } from '@/lib/productPricing';
 
 export const calculateCommissionTotal = (booking: Booking): number => {
   if (!booking.items?.length) return 0;
@@ -42,7 +43,7 @@ export const calculateCommissionTotalWithProducts = (
     const quantity = item.cantidad ?? 0;
     const unitPrice =
       item.precio_unitario ??
-      (item.tipo_alquiler === 'hora' ? product?.precio_hora : product?.precio_diario) ??
+      (item.tipo_alquiler === 'hora' ? product?.precio_hora : getProductDailyPrice(product, booking.fecha_inicio)) ??
       0;
 
     if (item.tipo_alquiler === 'hora') {

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { collection, getDocs, query, where, serverTimestamp, doc, getDoc, increment, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Product, BookingItem, RentalType, DailyStock, User as AppUser } from '@/types';
+import { getProductDailyPrice, getProductVatShortLabel } from '@/lib/productPricing';
 import { useAuthStore } from '@/store/authStore';
 import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor, AlertCircle, PackageX } from 'lucide-react';
 import { addDays, format, differenceInDays, eachDayOfInterval } from 'date-fns';
@@ -11,10 +12,12 @@ import { addDays, format, differenceInDays, eachDayOfInterval } from 'date-fns';
 interface BookingFormProps {
   onClose: () => void;
   onSuccess?: (data: { contractUrl: string; paymentUrl?: string; bookingId: string }) => void;
+  initialSelectedProductId?: string;
 }
 
-export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
+export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: BookingFormProps) {
   const { user } = useAuthStore();
+  const formatPrice = (amount: number) => amount.toLocaleString('es-ES', { maximumFractionDigits: 0 });
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [partners, setPartners] = useState<AppUser[]>([]);
@@ -147,6 +150,26 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
     checkStock();
   }, [startDate, endDate, products]);
 
+  useEffect(() => {
+    if (!initialSelectedProductId || items.length > 0) return;
+
+    const product = products.find((entry) => entry.id === initialSelectedProductId);
+    const stockInfo = product ? productStock[initialSelectedProductId] : null;
+
+    if (!product || !stockInfo || stockInfo.isOutOfStock || stockInfo.available < 1) {
+      return;
+    }
+
+    setItems([
+      {
+        producto_id: initialSelectedProductId,
+        cantidad: 1,
+        tipo_alquiler: 'dia',
+        duracion: 1,
+      }
+    ]);
+  }, [initialSelectedProductId, items.length, productStock, products]);
+
   const addItem = () => {
     if (products.length === 0 || !products[0].id) return;
     setItems([
@@ -176,7 +199,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       const days = Math.max(1, differenceInDays(end, start));
-      return product.precio_diario * days * item.cantidad;
+      return getProductDailyPrice(product, startDate) * days * item.cantidad;
     }
     return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
   };
@@ -243,7 +266,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
           precio_unitario:
             item.tipo_alquiler === 'hora'
               ? product?.precio_hora || 0
-              : product?.precio_diario || 0,
+              : getProductDailyPrice(product, startDate),
           comision_percent: product?.comision || 0, // Store commission rate at time of booking
           deposito_unitario: 0,
         };
@@ -460,6 +483,17 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const dayCount = Math.max(1, differenceInDays(new Date(endDate), new Date(startDate)));
   const userAllowsBookingWithoutPayment =
     (user?.rol === 'broker' || user?.rol === 'agency') && Boolean(user?.allow_booking_without_payment);
+  const selectedProducts = items
+    .map((item) => products.find((product) => product.id === item.producto_id))
+    .filter((product): product is Product => Boolean(product));
+  const vatSummaryLabel =
+    selectedProducts.length === 0
+      ? ''
+      : selectedProducts.every((product) => product.incluir_iva)
+        ? 'Precio con IVA incluido'
+        : selectedProducts.some((product) => product.incluir_iva)
+          ? 'Incluye IVA en los productos marcados'
+          : 'Precio sin IVA';
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -876,7 +910,7 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
                             const outOfStock = pStock?.isOutOfStock;
                             return (
                               <option key={p.id} value={p.id} disabled={outOfStock}>
-                                {p.nombre} - €{p.precio_diario}/día {outOfStock ? '(SIN STOCK)' : pStock ? `(${pStock.available} disp.)` : ''}
+                                {p.nombre} - €{formatPrice(getProductDailyPrice(p, startDate))}/día ({getProductVatShortLabel(p)}) {outOfStock ? '(SIN STOCK)' : pStock ? `(${pStock.available} disp.)` : ''}
                               </option>
                             );
                           })}
@@ -944,6 +978,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             <div className="text-xs text-gray-500 mt-1 space-y-1">
               <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
             </div>
+            {vatSummaryLabel ? (
+              <span className="text-xs text-amber-700 mt-2">{vatSummaryLabel}</span>
+            ) : null}
             <span className="text-3xl font-bold text-slate-900">€{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
           </div>
 

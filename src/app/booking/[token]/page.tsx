@@ -15,6 +15,7 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { getProductDailyPrice, getProductVatShortLabel } from '@/lib/productPricing';
 import { BookingItem, BookingLink, Product, User as AppUser } from '@/types';
 import { addDays, differenceInDays, format, eachDayOfInterval } from 'date-fns';
 import {
@@ -37,6 +38,7 @@ import {
 export default function PublicBookingPage() {
   const params = useParams();
   const token = params?.token as string;
+  const formatPrice = (amount: number) => amount.toLocaleString('es-ES', { maximumFractionDigits: 0 });
 
   const [link, setLink] = useState<BookingLink | null>(null);
   const [creatorUser, setCreatorUser] = useState<AppUser | null>(null);
@@ -189,11 +191,30 @@ export default function PublicBookingPage() {
     return items.reduce((acc, item) => {
       const product = products.find((p) => p.id === item.producto_id);
       if (!product) return acc;
-      return acc + product.precio_diario * dayCount * item.cantidad;
+      return acc + getProductDailyPrice(product, startDate) * dayCount * item.cantidad;
     }, 0);
-  }, [items, products, dayCount]);
+  }, [items, products, dayCount, startDate]);
 
   const total = rentalTotal;
+  const vatSummaryLabel = useMemo(() => {
+    const selectedProducts = items
+      .map((item) => products.find((product) => product.id === item.producto_id))
+      .filter((product): product is Product => Boolean(product));
+
+    if (selectedProducts.length === 0) {
+      return '';
+    }
+
+    if (selectedProducts.every((product) => product.incluir_iva)) {
+      return 'Precio con IVA incluido';
+    }
+
+    if (selectedProducts.some((product) => product.incluir_iva)) {
+      return 'Incluye IVA en los productos marcados';
+    }
+
+    return 'Precio sin IVA';
+  }, [items, products]);
 
   const updateQuantity = (productId: string, delta: number) => {
     setQuantities((prev) => {
@@ -294,7 +315,7 @@ export default function PublicBookingPage() {
           precio_unitario:
             item.tipo_alquiler === 'hora'
               ? product?.precio_hora || 0
-              : product?.precio_diario || 0,
+              : getProductDailyPrice(product, startDate),
           comision_percent: product?.comision || 0,
           deposito_unitario: 0,
         };
@@ -315,7 +336,7 @@ export default function PublicBookingPage() {
           const start = new Date(startDate);
           const end = new Date(endDate);
           const days = Math.max(1, differenceInDays(end, start));
-          return product.precio_diario * days * item.cantidad;
+          return getProductDailyPrice(product, startDate) * days * item.cantidad;
         }
         return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
       };
@@ -748,7 +769,10 @@ export default function PublicBookingPage() {
                         </div>
                         <div className="flex-1">
                           <h3 className="font-semibold text-slate-900">{product.nombre}</h3>
-                          <p className="text-sm text-slate-500">€{product.precio_diario}/día</p>
+                          <p className="text-sm text-slate-500">€{formatPrice(getProductDailyPrice(product, startDate))}/día</p>
+                          <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-1">
+                            {getProductVatShortLabel(product)}
+                          </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <button
@@ -913,11 +937,16 @@ export default function PublicBookingPage() {
               <div>
                 <p className="text-sm text-slate-500">Total estimado</p>
                 <div className="text-3xl font-bold text-slate-900">
-                  €{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                  €{formatPrice(total)}
                 </div>
                 <div className="text-xs text-slate-500 mt-2 space-y-1">
-                  <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
+                  <div>Alquiler: €{formatPrice(rentalTotal)}</div>
                 </div>
+                {vatSummaryLabel ? (
+                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-2">
+                    {vatSummaryLabel}
+                  </p>
+                ) : null}
                 <p className="text-xs text-slate-400 mt-1">
                   Precio sujeto a disponibilidad y confirmación final.
                 </p>

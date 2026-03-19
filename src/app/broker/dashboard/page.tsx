@@ -1,15 +1,16 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { useAuthStore } from '@/store/authStore';
-import { Booking } from '@/types';
+import { Booking, Product } from '@/types';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Plus, Eye, Share2, Calendar, Euro, Wallet, ArrowRight } from 'lucide-react';
+import { Plus, Eye, Share2, Calendar, Euro, Wallet, ArrowRight, Package, X } from 'lucide-react';
 import Link from 'next/link';
 import { usePartnerCommissions } from '@/lib/firebase/hooks/usePartnerCommissions';
+import { getProductBaseDailyPrice, getProductDailyPrice } from '@/lib/productPricing';
 
 function getDate(dateValue: any): Date {
   if (!dateValue) return new Date();
@@ -23,6 +24,8 @@ function getDate(dateValue: any): Date {
 export default function BrokerDashboard() {
   const { user } = useAuthStore();
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     total: 0,
@@ -106,6 +109,15 @@ export default function BrokerDashboard() {
     fetchBookings();
   }, [user]);
 
+  useEffect(() => {
+    const productsQuery = query(collection(db, 'products'), orderBy('nombre'));
+    const unsubscribe = onSnapshot(productsQuery, (snapshot) => {
+      setProducts(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Product)));
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   const handleShare = async (booking: Booking) => {
     if (booking.token_acceso) {
       const contractUrl = `${window.location.origin}/contract/${booking.id}?t=${booking.token_acceso}`;
@@ -121,6 +133,9 @@ export default function BrokerDashboard() {
       </div>
     );
   }
+
+  const formatPrice = (amount: number) =>
+    amount.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 
   return (
     <div className="space-y-6">
@@ -302,6 +317,125 @@ export default function BrokerDashboard() {
           )}
         </div>
       </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <div className="flex items-center justify-between gap-3 mb-5">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">Productos</h2>
+            <p className="text-sm text-slate-600">
+              Consulta una ficha rápida del producto y empieza una reserva desde aquí.
+            </p>
+          </div>
+          <Link href="/broker/reservas?new=true" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+            Ir a reservas
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {products.map((product) => (
+            <button
+              key={product.id}
+              type="button"
+              onClick={() => setSelectedProduct(product)}
+              className="overflow-hidden rounded-2xl border border-gray-200 bg-white text-left transition-shadow hover:shadow-md"
+            >
+              <div className="h-40 bg-slate-100">
+                {product.imagen_url ? (
+                  <img src={product.imagen_url} alt={product.nombre} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-slate-400">
+                    <Package size={30} />
+                  </div>
+                )}
+              </div>
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900">{product.nombre}</h3>
+                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{product.tipo}</p>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${product.activo ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
+                    {product.activo ? 'Activo' : 'Inactivo'}
+                  </span>
+                </div>
+                <p className="mt-3 line-clamp-2 text-sm text-slate-600">{product.descripcion || 'Sin descripción.'}</p>
+                <div className="mt-4 flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-2xl font-bold text-slate-900">{formatPrice(getProductBaseDailyPrice(product))}</p>
+                    <p className="text-xs text-slate-500">
+                      {product.incluir_iva ? 'Precio con IVA incluido' : 'Precio sin IVA'}
+                    </p>
+                    {product.incluir_iva ? (
+                      <p className="mt-2 text-sm font-semibold text-emerald-700">
+                        Total: {formatPrice(getProductDailyPrice(product))}
+                      </p>
+                    ) : null}
+                  </div>
+                  <span className="text-sm font-medium text-blue-600">Ver info</span>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {selectedProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <div>
+                <h3 className="text-xl font-semibold text-slate-900">{selectedProduct.nombre}</h3>
+                <p className="text-sm text-slate-500">{selectedProduct.tipo}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedProduct(null)} className="btn-icon text-slate-500 hover:bg-slate-100">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="grid gap-6 p-6 md:grid-cols-[1.1fr_0.9fr]">
+              <div className="min-h-64 overflow-hidden rounded-2xl bg-slate-100">
+                {selectedProduct.imagen_url ? (
+                  <img src={selectedProduct.imagen_url} alt={selectedProduct.nombre} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-slate-400">
+                    <Package size={36} />
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col">
+                <p className="text-sm leading-6 text-slate-600">
+                  {selectedProduct.descripcion || 'Sin descripción disponible.'}
+                </p>
+                <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm text-slate-500">
+                    {selectedProduct.incluir_iva ? 'Precio por dia con IVA incluido' : 'Precio por dia sin IVA'}
+                  </p>
+                  <p className="mt-1 text-3xl font-bold text-slate-900">
+                    {formatPrice(getProductBaseDailyPrice(selectedProduct))}
+                  </p>
+                  {selectedProduct.incluir_iva ? (
+                    <>
+                      <p className="mt-4 text-sm text-slate-500">Total por dia</p>
+                      <p className="mt-1 text-3xl font-bold text-emerald-700">
+                        {formatPrice(getProductDailyPrice(selectedProduct))}
+                      </p>
+                      <p className="mt-2 text-xs text-slate-500">IVA incluido (+21%).</p>
+                    </>
+                  ) : null}
+                </div>
+                <div className="mt-auto pt-6">
+                  <Link
+                    href={`/broker/reservas?new=true&productId=${selectedProduct.id}`}
+                    className="btn-primary w-full justify-center"
+                    onClick={() => setSelectedProduct(null)}
+                  >
+                    Empezar reserva
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
