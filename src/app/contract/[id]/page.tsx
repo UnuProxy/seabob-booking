@@ -590,8 +590,10 @@ export default function ContractPage() {
     return item.producto_id || copy.labels.notProvided;
   };
 
-  const getLocationLabel = (value?: Booking['ubicacion_entrega']) => {
+  const getLocationLabel = (booking?: Booking | null) => {
+    const value = booking?.ubicacion_entrega;
     if (!value) return copy.labels.notProvided;
+    if (value === 'otro') return booking?.ubicacion_entrega_detalle || LOCATION_LABELS.otro?.[lang] || value;
     return LOCATION_LABELS[value]?.[lang] || value;
   };
 
@@ -749,7 +751,7 @@ export default function ContractPage() {
   if (success && !printMode && !adminView) {
     const successMessage = copy.success.body.replace('{name}', booking.cliente.nombre);
     const successDate = format(new Date(booking.fecha_inicio), getDateFormat(), { locale });
-    const successLocation = getLocationLabel(booking.ubicacion_entrega);
+    const successLocation = getLocationLabel(booking);
     const successStep3 = copy.success.step3
       .replace('{location}', successLocation)
       .replace('{date}', successDate);
@@ -884,7 +886,7 @@ export default function ContractPage() {
                   {copy.labels.location}
                 </span>
                 <span className="font-bold text-gray-900 text-lg">
-                  {getLocationLabel(booking.ubicacion_entrega)}
+                  {getLocationLabel(booking)}
                 </span>
               </div>
               {booking.hora_entrega && (

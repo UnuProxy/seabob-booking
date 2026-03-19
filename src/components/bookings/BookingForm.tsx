@@ -40,10 +40,14 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const minDateStr = format(minDate, 'yyyy-MM-dd');
   const [startDate, setStartDate] = useState(minDateStr);
   const [endDate, setEndDate] = useState(minDateStr); // Default same day (1 day service)
+  const [isMultiDay, setIsMultiDay] = useState(false);
   const [items, setItems] = useState<BookingItem[]>([]);
+  const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
   
   // Delivery Details
   const [deliveryLocation, setDeliveryLocation] = useState<'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro'>('marina_ibiza');
+  const [deliveryLocationDetail, setDeliveryLocationDetail] = useState('');
   const [boatName, setBoatName] = useState('');
   const [dockingNumber, setDockingNumber] = useState('');
   const [deliveryTime, setDeliveryTime] = useState('09:00'); // Default 9 AM
@@ -99,6 +103,12 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
 
     fetchPartners();
   }, [user]);
+
+  useEffect(() => {
+    if (!isMultiDay) {
+      setEndDate(startDate);
+    }
+  }, [isMultiDay, startDate]);
 
   // Check stock availability for selected dates
   useEffect(() => {
@@ -171,16 +181,22 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   }, [initialSelectedProductId, items.length, productStock, products]);
 
   const addItem = () => {
-    if (products.length === 0 || !products[0].id) return;
-    setItems([
-      ...items, 
-      { 
-        producto_id: products[0].id, 
-        cantidad: 1, 
-        tipo_alquiler: 'dia', 
-        duracion: 1 
+    if (products.length === 0) return;
+    setIsProductPickerOpen((prev) => !prev);
+  };
+
+  const addItemWithProduct = (productId: string) => {
+    setItems((prev) => [
+      ...prev,
+      {
+        producto_id: productId,
+        cantidad: 1,
+        tipo_alquiler: 'dia',
+        duracion: 1,
       }
     ]);
+    setIsProductPickerOpen(false);
+    setError('');
   };
 
   const updateItem = (index: number, field: keyof BookingItem, value: any) => {
@@ -211,12 +227,63 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
     }, 0);
   };
 
+  const validateStep = (step: number) => {
+    if (step === 1) {
+      if (!clientName) {
+        setError('El nombre del cliente es obligatorio');
+        return false;
+      }
+      return true;
+    }
+
+    if (step === 2) {
+      if (startDate < minDateStr) {
+        setError('No se pueden crear reservas para hoy después de las 17:00. Selecciona otra fecha.');
+        return false;
+      }
+      if (deliveryLocation === 'otro' && !deliveryLocationDetail.trim()) {
+        setError('Escribe la direccion de entrega.');
+        return false;
+      }
+      if (!deliveryLocation || !deliveryTime) {
+        setError('Completa los datos de entrega.');
+        return false;
+      }
+      return true;
+    }
+
+    if (step === 3) {
+      if (items.length === 0) {
+        setError('Debes añadir al menos un producto');
+        return false;
+      }
+      if (items.some((item) => !item.producto_id)) {
+        setError('Selecciona un producto en cada linea antes de continuar.');
+        return false;
+      }
+      return true;
+    }
+
+    return true;
+  };
+
+  const goToNextStep = () => {
+    if (!validateStep(currentStep)) return;
+    setError('');
+    setCurrentStep((prev) => Math.min(4, prev + 1));
+  };
+
+  const goToPreviousStep = () => {
+    setError('');
+    setCurrentStep((prev) => Math.max(1, prev - 1));
+  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-    if (!clientName || !clientEmail) {
-      setError('El nombre y email del cliente son obligatorios');
+    if (!clientName) {
+      setError('El nombre del cliente es obligatorio');
       return;
     }
     if (startDate < minDateStr) {
@@ -225,6 +292,10 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
     }
     if (items.length === 0) {
       setError('Debes añadir al menos un producto');
+      return;
+    }
+    if (items.some((item) => !item.producto_id)) {
+      setError('Selecciona un producto en cada linea antes de continuar.');
       return;
     }
 
@@ -326,6 +397,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         
         // Delivery Details
         ubicacion_entrega: deliveryLocation,
+        ubicacion_entrega_detalle: deliveryLocation === 'otro' ? deliveryLocationDetail.trim() : '',
         nombre_barco: boatName,
         numero_amarre: dockingNumber,
         hora_entrega: deliveryTime,
@@ -553,14 +625,13 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[96vh]">
         
         {/* Header */}
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
+        <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
           <div>
-            <h2 className="text-2xl font-bold text-gray-800">Nueva Reserva</h2>
-            <p className="text-gray-500 text-sm mt-1">Rellena los datos para crear un nuevo alquiler.</p>
+            <h2 className="text-xl font-bold text-gray-800">Nueva Reserva</h2>
           </div>
           <button
             onClick={onClose}
@@ -570,7 +641,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-8 space-y-6 bg-slate-50">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50">
           {error && (
             <div className="bg-red-50 text-red-700 p-4 rounded-xl flex items-center gap-2 border border-red-100">
               <ShoppingBag size={20} />
@@ -578,23 +649,53 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
             </div>
           )}
 
+          <div className="grid grid-cols-4 md:grid-cols-4 gap-2">
+            {[
+              { step: 1, label: 'Cliente' },
+              { step: 2, label: 'Reserva' },
+              { step: 3, label: 'Productos' },
+              { step: 4, label: 'Notas' },
+            ].map((item) => (
+              <button
+                key={item.step}
+                type="button"
+                onClick={() => {
+                  if (item.step <= currentStep) {
+                    setError('');
+                    setCurrentStep(item.step);
+                  }
+                }}
+                className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                  item.step === currentStep
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : item.step < currentStep
+                      ? 'border-slate-200 bg-white text-slate-700'
+                      : 'border-slate-200 bg-slate-100 text-slate-400'
+                }`}
+              >
+                <span className="md:hidden">{item.step}</span>
+                <span className="hidden md:inline">{item.label}</span>
+              </button>
+            ))}
+          </div>
+
           {/* Section 1: Client Info */}
-          <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          {currentStep === 1 && (
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
             <div className="flex items-start gap-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
                 1
               </div>
-              <div>
+              <div className="flex-1">
                 <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
                   <User className="text-blue-600" size={20} />
-                  Datos del Cliente
+                  Cliente
                 </h3>
-                <p className="text-sm text-gray-500 mt-1">Información para contactar y enviar confirmaciones.</p>
               </div>
             </div>
-            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Nombre Completo</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Nombre</label>
                 <input
                   type="text"
                   value={clientName}
@@ -612,11 +713,10 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                   onChange={e => setClientEmail(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                   placeholder="juan@ejemplo.com"
-                  required
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Teléfono / WhatsApp</label>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Teléfono</label>
                 <input
                   type="tel"
                   value={clientPhone}
@@ -624,7 +724,6 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                   className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                   placeholder="+34 600 000 000"
                 />
-                <p className="text-xs text-gray-500 mt-2">Úsalo para coordinar la entrega y resolver dudas.</p>
               </div>
               <div className="md:col-span-2">
                 {user?.rol === 'admin' ? (
@@ -643,23 +742,21 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
               </div>
             </div>
           </section>
+          )}
 
-          {user?.rol === 'admin' && (
-            <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          {currentStep === 1 && user?.rol === 'admin' && (
+            <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
               <div className="flex items-start gap-4">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
                   <CreditCard className="h-5 w-5" />
                 </div>
-                <div>
+                <div className="flex-1">
                   <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
-                    Opciones de Pago y Asignacion
+                    Pago y asignacion
                   </h3>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Confirma sin pago y asigna la reserva a un broker o agencia.
-                  </p>
                 </div>
               </div>
-              <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex items-center gap-3">
                   <input
                     id="skipPayment"
@@ -717,81 +814,78 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
           )}
 
           {/* Section 2: Dates & Details */}
-          <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          {currentStep === 2 && (
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
             <div className="flex items-start gap-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
                 2
               </div>
-              <div>
+              <div className="flex-1">
                 <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
                   <Calendar className="text-blue-600" size={20} />
-                  Fechas del Alquiler
+                  Reserva
                 </h3>
-                <p className="text-sm text-gray-500 mt-1">Define el periodo para calcular la duración y el total.</p>
               </div>
             </div>
-            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Fecha Inicio</label>
-                <input
-                  type="date"
-                  value={startDate}
-                  min={minDateStr}
-                  onChange={(e) => {
-                    const nextDate = e.target.value || minDateStr;
-                    const safeDate = nextDate < minDateStr ? minDateStr : nextDate;
-                    setStartDate(safeDate);
-                    setEndDate(safeDate);
-                  }}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Fecha Fin</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  min={startDate < minDateStr ? minDateStr : startDate}
-                  onChange={(e) => {
-                    const nextDate = e.target.value || startDate;
-                    setEndDate(nextDate < startDate ? startDate : nextDate);
-                  }}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                  required
-                />
-              </div>
-            </div>
-            <p className="mt-3 text-sm text-gray-500 bg-blue-50 inline-block px-3 py-1 rounded-lg border border-blue-100">
-              Duración: <span className="font-bold text-blue-700">{dayCount} {dayCount === 1 ? 'día' : 'días'}</span>
-            </p>
-            {isPastCutoff && (
-              <p className="mt-2 text-xs text-amber-700 bg-amber-50 inline-block px-3 py-1 rounded-lg border border-amber-100">
-                Después de las 17:00 no se permiten reservas para hoy.
-              </p>
-            )}
-          </section>
-
-          {/* Section 3: Delivery Details */}
-          <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
-             <div className="flex items-start gap-4">
-               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
-                 3
-               </div>
-               <div>
-                 <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
-                    <Anchor className="text-blue-600" size={20} />
-                    Detalles de Entrega
-                 </h3>
-                 <p className="text-sm text-gray-500 mt-1">Indica dónde y cuándo entregar el equipo.</p>
-               </div>
-             </div>
-             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className={`grid grid-cols-1 gap-3 ${isMultiDay ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-3'}`}>
+                <div className="md:col-span-2">
+                  <label className="mb-2 block text-sm font-semibold text-gray-700">Inicio</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={startDate}
+                      min={minDateStr}
+                      onChange={(e) => {
+                        const nextDate = e.target.value || minDateStr;
+                        const safeDate = nextDate < minDateStr ? minDateStr : nextDate;
+                        setStartDate(safeDate);
+                        setEndDate(safeDate);
+                      }}
+                      className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-4 py-3 font-medium text-gray-900 outline-none transition-all focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10"
+                      required
+                    />
+                    <label className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={isMultiDay}
+                        onChange={(e) => setIsMultiDay(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-900/30"
+                      />
+                      <span className="hidden sm:inline">Varios dias</span>
+                    </label>
+                    <div className="shrink-0 rounded-xl bg-blue-100 px-3 py-3 text-sm font-bold text-blue-700">
+                      {dayCount} {dayCount === 1 ? 'día' : 'días'}
+                    </div>
+                  </div>
+                </div>
+                {isMultiDay ? (
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-gray-700">Fin</label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      min={startDate < minDateStr ? minDateStr : startDate}
+                      onChange={(e) => {
+                        const nextDate = e.target.value || startDate;
+                        setEndDate(nextDate < startDate ? startDate : nextDate);
+                      }}
+                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-medium text-gray-900 outline-none transition-all focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10"
+                      required={isMultiDay}
+                    />
+                  </div>
+                ) : null}
                 <div>
-                   <label className="block text-sm font-semibold text-gray-700 mb-2">Ubicación *</label>
+                   <label className="mb-2 block text-sm font-semibold text-gray-700">Ubicación</label>
                    <select
                       value={deliveryLocation}
-                      onChange={(e) => setDeliveryLocation(e.target.value as any)}
+                      onChange={(e) => {
+                        const nextValue = e.target.value as 'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro';
+                        setDeliveryLocation(nextValue);
+                        if (nextValue !== 'otro') {
+                          setDeliveryLocationDetail('');
+                        }
+                      }}
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                       required
                    >
@@ -801,8 +895,21 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                       <option value="otro">Otro</option>
                    </select>
                 </div>
+                {deliveryLocation === 'otro' ? (
+                  <div className="md:col-span-2">
+                    <label className="mb-2 block text-sm font-semibold text-gray-700">Direccion</label>
+                    <textarea
+                      value={deliveryLocationDetail}
+                      onChange={(e) => setDeliveryLocationDetail(e.target.value)}
+                      rows={2}
+                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-medium text-gray-900 outline-none transition-all focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10"
+                      placeholder="Escribe la direccion de entrega"
+                      required
+                    />
+                  </div>
+                ) : null}
                 <div>
-                   <label className="block text-sm font-semibold text-gray-700 mb-2">Hora de Entrega *</label>
+                   <label className="mb-2 block text-sm font-semibold text-gray-700">Hora</label>
                    <input
                       type="time"
                       value={deliveryTime}
@@ -810,10 +917,9 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                       required
                    />
-                   <p className="text-xs text-gray-500 mt-1">Hora a la que se entregará el equipo.</p>
                 </div>
                 <div>
-                   <label className="block text-sm font-semibold text-gray-700 mb-2">Nombre del Barco</label>
+                   <label className="mb-2 block text-sm font-semibold text-gray-700">Barco</label>
                    <input
                       type="text"
                       value={boatName}
@@ -823,7 +929,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                    />
                 </div>
                 <div>
-                   <label className="block text-sm font-semibold text-gray-700 mb-2">Número de Amarre</label>
+                   <label className="mb-2 block text-sm font-semibold text-gray-700">Amarre</label>
                    <input
                       type="text"
                       value={dockingNumber}
@@ -832,22 +938,30 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                       className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
                    />
                 </div>
-             </div>
-          </section>
+                </div>
 
-          {/* Section 4: Items */}
-          <section className="rounded-2xl border-2 border-blue-200 bg-blue-50/40 p-6 shadow-sm">
+              {isPastCutoff && (
+                <p className="mt-3 inline-block rounded-lg border border-amber-100 bg-amber-50 px-3 py-1 text-xs text-amber-700">
+                  Sin reservas hoy despues de las 17:00
+                </p>
+              )}
+            </div>
+          </section>
+          )}
+
+          {/* Section 3: Items */}
+          {currentStep === 3 && (
+          <section className="rounded-2xl border-2 border-blue-200 bg-blue-50/40 p-4 shadow-sm">
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-start gap-4">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white text-sm font-semibold shadow-sm">
-                  4
+                  3
                 </div>
-                <div>
+                <div className="flex-1">
                   <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
                     <ShoppingBag className="text-blue-700" size={20} />
                     Productos
                   </h3>
-                  <p className="text-sm text-gray-600 mt-1">Añade los equipos y cantidades para esta reserva.</p>
                 </div>
               </div>
               <button
@@ -855,18 +969,52 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                 onClick={addItem}
                 className="btn-ghost text-blue-700"
               >
-                <Plus size={16} /> Añadir Producto
+                <Plus size={16} /> Añadir producto
               </button>
             </div>
 
             <div className="space-y-4">
+              {isProductPickerOpen ? (
+                <div className="rounded-xl border border-blue-200 bg-white p-3 shadow-sm">
+                  <div className="mb-2 text-sm font-semibold text-slate-700">Selecciona un producto</div>
+                  <div className="grid gap-2">
+                    {products.map((product) => {
+                      if (!product.id) return null;
+
+                      const stockInfo = productStock[product.id];
+                      const isOutOfStock = Boolean(stockInfo?.isOutOfStock);
+
+                      return (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => addItemWithProduct(product.id as string)}
+                          disabled={isOutOfStock}
+                          className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 text-left transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-400"
+                        >
+                          <div>
+                            <div className="font-medium text-slate-900">{product.nombre}</div>
+                            <div className="text-xs text-slate-500">
+                              €{formatPrice(getProductDailyPrice(product, startDate))}/dia · {getProductVatShortLabel(product)}
+                            </div>
+                          </div>
+                          <div className={`text-xs font-semibold ${isOutOfStock ? 'text-red-600' : stockInfo?.isLowStock ? 'text-yellow-700' : 'text-green-700'}`}>
+                            {isOutOfStock ? 'Sin stock' : stockInfo ? `${stockInfo.available} disp.` : 'Disponibilidad'}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               {items.map((item, index) => {
                 const selectedProduct = products.find(p => p.id === item.producto_id);
                 const stockInfo = selectedProduct?.id ? productStock[selectedProduct.id] : null;
                 const showStockWarning = stockInfo && (stockInfo.isOutOfStock || stockInfo.isLowStock);
                 
                 return (
-                  <div key={index} className="flex flex-col gap-3 bg-white/90 p-4 rounded-xl border-2 border-blue-100 relative group text-gray-900 shadow-sm">
+                  <div key={index} className="flex flex-col gap-3 bg-white/90 p-3 rounded-xl border-2 border-blue-100 relative group text-gray-900 shadow-sm">
                     {/* Stock Warning Banner */}
                     {showStockWarning && (
                       <div className={`flex items-center gap-2 p-3 rounded-lg ${stockInfo.isOutOfStock ? 'bg-red-50 border border-red-200' : 'bg-yellow-50 border border-yellow-200'}`}>
@@ -905,6 +1053,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                           onChange={(e) => updateItem(index, 'producto_id', e.target.value)}
                           className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 font-medium"
                         >
+                          <option value="">Selecciona un producto</option>
                           {products.map(p => {
                             const pStock = p.id ? productStock[p.id] : null;
                             const outOfStock = pStock?.isOutOfStock;
@@ -926,6 +1075,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                           value={item.cantidad}
                           onChange={(e) => updateItem(index, 'cantidad', parseInt(e.target.value))}
                           className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 font-medium"
+                          disabled={!item.producto_id}
                         />
                       </div>
 
@@ -941,65 +1091,85 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                 );
               })}
 
-              {items.length === 0 && (
+              {!isProductPickerOpen && items.length === 0 ? (
                 <div className="text-center py-8 bg-white/80 border-2 border-dashed border-blue-200 rounded-xl text-gray-600">
-                  No hay productos seleccionados. Usa “Añadir Producto” para empezar.
+                  Usa “Añadir producto” para abrir la lista.
                 </div>
-              )}
+              ) : null}
+
             </div>
           </section>
+          )}
           
-          {/* Section 5: Notes */}
-          <section className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          {/* Section 4: Notes */}
+          {currentStep === 4 && (
+          <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
              <div className="flex items-start gap-4">
                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
-                 5
+                 4
                </div>
-               <div>
+               <div className="flex-1">
                  <h3 className="text-lg font-bold text-gray-800">Notas Adicionales</h3>
-                 <p className="text-sm text-gray-500 mt-1">Agrega instrucciones especiales o contexto interno.</p>
                </div>
              </div>
              <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                rows={3}
+                rows={2}
                 className="w-full mt-4 px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900"
                 placeholder="Instrucciones especiales..."
              />
           </section>
+          )}
 
         </form>
 
         {/* Footer */}
-        <div className="p-6 border-t border-gray-100 bg-white rounded-b-2xl flex justify-between items-center">
+        <div className="px-5 py-4 border-t border-gray-100 bg-white rounded-b-2xl flex items-end justify-between gap-4">
           <div className="flex flex-col">
-            <span className="text-sm text-gray-500 font-medium">Total Estimado</span>
-            <div className="text-xs text-gray-500 mt-1 space-y-1">
-              <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
-            </div>
+            <span className="text-xs text-gray-500 font-medium">Total</span>
             {vatSummaryLabel ? (
-              <span className="text-xs text-amber-700 mt-2">{vatSummaryLabel}</span>
+              <span className="text-xs text-amber-700 mt-1">{vatSummaryLabel}</span>
             ) : null}
-            <span className="text-3xl font-bold text-slate-900">€{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
+            <span className="text-2xl font-bold text-slate-900">€{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
           </div>
 
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-outline"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={loading || items.length === 0}
-              className="btn-primary disabled:opacity-50"
-            >
-              {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
-              Crear Reserva
-            </button>
+          <div className="flex gap-3 shrink-0">
+            {currentStep > 1 ? (
+              <button
+                type="button"
+                onClick={goToPreviousStep}
+                className="btn-outline"
+              >
+                Atras
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onClose}
+                className="btn-outline"
+              >
+                Cancelar
+              </button>
+            )}
+            {currentStep < 4 ? (
+              <button
+                type="button"
+                onClick={goToNextStep}
+                className="btn-primary"
+              >
+                Siguiente
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="btn-primary disabled:opacity-50"
+              >
+                {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                Crear Reserva
+              </button>
+            )}
           </div>
         </div>
       </div>

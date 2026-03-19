@@ -516,6 +516,7 @@ export default function BrokerReservasPage() {
                     viewingBooking.ubicacion_entrega === 'marina_ibiza' ? 'Marina Ibiza' :
                     viewingBooking.ubicacion_entrega === 'marina_botafoch' ? 'Marina Botafoch' :
                     viewingBooking.ubicacion_entrega === 'club_nautico' ? 'Club Náutico' :
+                    viewingBooking.ubicacion_entrega === 'otro' ? (viewingBooking.ubicacion_entrega_detalle || 'Otro') :
                     viewingBooking.ubicacion_entrega || 'No especificado'
                   }</p>
                   {viewingBooking.nombre_barco && (

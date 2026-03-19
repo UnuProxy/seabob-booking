@@ -267,6 +267,9 @@ export default function BookingsPage() {
 
   const getLocationLabel = (booking: Booking) => {
     if (!booking.ubicacion_entrega) return 'No especificado';
+    if (booking.ubicacion_entrega === 'otro') {
+      return booking.ubicacion_entrega_detalle || 'Otro';
+    }
     if (booking.ubicacion_entrega === 'marina_ibiza') return 'Marina Ibiza';
     if (booking.ubicacion_entrega === 'marina_botafoch') return 'Marina Botafoch';
     if (booking.ubicacion_entrega === 'club_nautico') return 'Club Náutico';
@@ -1241,7 +1244,9 @@ function BookingDetailsModal({
         ? 'Marina Botafoch'
         : booking.ubicacion_entrega === 'club_nautico'
           ? 'Club Náutico'
-          : booking.ubicacion_entrega || 'No indicado';
+          : booking.ubicacion_entrega === 'otro'
+            ? (booking.ubicacion_entrega_detalle || 'Otro')
+            : booking.ubicacion_entrega || 'No indicado';
 
   const copyDatesAndDelivery = async () => {
     const text = [

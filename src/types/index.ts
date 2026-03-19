@@ -104,6 +104,7 @@ export interface Booking {
   fecha_inicio: string;
   fecha_fin: string;
   ubicacion_entrega?: 'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro';
+  ubicacion_entrega_detalle?: string;
   nombre_barco?: string;
   numero_amarre?: string;
   hora_entrega?: string;

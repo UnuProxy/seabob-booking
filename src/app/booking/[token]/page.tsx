@@ -64,6 +64,7 @@ export default function PublicBookingPage() {
   const minDateStr = format(minDate, 'yyyy-MM-dd');
   const [startDate, setStartDate] = useState(minDateStr);
   const [endDate, setEndDate] = useState(minDateStr);
+  const [isMultiDay, setIsMultiDay] = useState(false);
 
   const [deliveryLocation, setDeliveryLocation] = useState<
     'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro'
@@ -169,6 +170,12 @@ export default function PublicBookingPage() {
       setEndDate(startDate);
     }
   }, [startDate, endDate]);
+
+  useEffect(() => {
+    if (!isMultiDay) {
+      setEndDate(startDate);
+    }
+  }, [isMultiDay, startDate]);
 
   const dayCount = useMemo(() => {
     const start = new Date(startDate);
@@ -679,15 +686,25 @@ export default function PublicBookingPage() {
                   1
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900">Fechas del alquiler</h2>
-                  <p className="text-sm text-slate-500">Elige cuándo quieres disfrutar del SeaBob.</p>
+                  <h2 className="text-lg font-bold text-slate-900">Fechas</h2>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <label className="inline-flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={isMultiDay}
+                    onChange={(e) => setIsMultiDay(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Varios dias
+                </label>
+
+                <div className={`grid grid-cols-1 gap-6 ${isMultiDay ? 'md:grid-cols-2' : ''}`}>
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
-                    <CalendarDays size={18} /> Fecha inicio
+                    <CalendarDays size={18} /> Inicio
                   </span>
                   <input
                     type="date"
@@ -703,27 +720,30 @@ export default function PublicBookingPage() {
                     required
                   />
                 </label>
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
-                    <CalendarDays size={18} /> Fecha fin
-                  </span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    min={startDate < minDateStr ? minDateStr : startDate}
-                    onChange={(e) => {
-                      const nextDate = e.target.value || startDate;
-                      setEndDate(nextDate < startDate ? startDate : nextDate);
-                    }}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-                    required
-                  />
-                </label>
+                  {isMultiDay ? (
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
+                        <CalendarDays size={18} /> Fin
+                      </span>
+                      <input
+                        type="date"
+                        value={endDate}
+                        min={startDate < minDateStr ? minDateStr : startDate}
+                        onChange={(e) => {
+                          const nextDate = e.target.value || startDate;
+                          setEndDate(nextDate < startDate ? startDate : nextDate);
+                        }}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                        required={isMultiDay}
+                      />
+                    </label>
+                  ) : null}
+                </div>
               </div>
 
-              <div className="mt-4 inline-flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-semibold">
+              <div className="mt-2 inline-flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-semibold">
                 <CalendarDays size={16} />
-                Duración: {dayCount} {dayCount === 1 ? 'día' : 'días'}
+                {dayCount} {dayCount === 1 ? 'día' : 'días'}
               </div>
               {isPastCutoff && (
                 <div className="mt-2 inline-flex items-center gap-2 bg-amber-50 text-amber-700 px-4 py-2 rounded-full text-xs font-semibold">
