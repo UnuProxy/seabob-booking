@@ -12,9 +12,10 @@ import { addDays, format, differenceInDays, eachDayOfInterval } from 'date-fns';
 interface BookingFormProps {
   onClose: () => void;
   onSuccess?: (data: { contractUrl: string; paymentUrl?: string; bookingId: string }) => void;
+  initialSelectedProductId?: string;
 }
 
-export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
+export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: BookingFormProps) {
   const { user } = useAuthStore();
   const formatPrice = (amount: number) => amount.toLocaleString('es-ES', { maximumFractionDigits: 0 });
   const [loading, setLoading] = useState(false);
@@ -148,6 +149,26 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
 
     checkStock();
   }, [startDate, endDate, products]);
+
+  useEffect(() => {
+    if (!initialSelectedProductId || items.length > 0) return;
+
+    const product = products.find((entry) => entry.id === initialSelectedProductId);
+    const stockInfo = product ? productStock[initialSelectedProductId] : null;
+
+    if (!product || !stockInfo || stockInfo.isOutOfStock || stockInfo.available < 1) {
+      return;
+    }
+
+    setItems([
+      {
+        producto_id: initialSelectedProductId,
+        cantidad: 1,
+        tipo_alquiler: 'dia',
+        duracion: 1,
+      }
+    ]);
+  }, [initialSelectedProductId, items.length, productStock, products]);
 
   const addItem = () => {
     if (products.length === 0 || !products[0].id) return;
@@ -462,6 +483,17 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
   const dayCount = Math.max(1, differenceInDays(new Date(endDate), new Date(startDate)));
   const userAllowsBookingWithoutPayment =
     (user?.rol === 'broker' || user?.rol === 'agency') && Boolean(user?.allow_booking_without_payment);
+  const selectedProducts = items
+    .map((item) => products.find((product) => product.id === item.producto_id))
+    .filter((product): product is Product => Boolean(product));
+  const vatSummaryLabel =
+    selectedProducts.length === 0
+      ? ''
+      : selectedProducts.every((product) => product.incluir_iva)
+        ? 'Precio con IVA incluido'
+        : selectedProducts.some((product) => product.incluir_iva)
+          ? 'Incluye IVA en los productos marcados'
+          : 'Precio sin IVA';
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -946,9 +978,9 @@ export function BookingForm({ onClose, onSuccess }: BookingFormProps) {
             <div className="text-xs text-gray-500 mt-1 space-y-1">
               <div>Alquiler: €{rentalTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
             </div>
-            <span className="text-xs text-amber-700 mt-2">
-              Los precios se muestran sin IVA por defecto. Si un producto lleva IVA, se indica como IVA incluido (+21%).
-            </span>
+            {vatSummaryLabel ? (
+              <span className="text-xs text-amber-700 mt-2">{vatSummaryLabel}</span>
+            ) : null}
             <span className="text-3xl font-bold text-slate-900">€{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
           </div>
 

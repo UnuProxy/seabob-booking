@@ -38,6 +38,7 @@ export default function BookingsPage() {
   const searchParams = useSearchParams();
   const initialBookingRef = searchParams.get('bookingRef')?.trim() ?? '';
   const initialServiceDate = searchParams.get('serviceDate')?.trim() ?? '';
+  const initialSelectedProductId = searchParams.get('productId')?.trim() ?? '';
   const shouldOpenNewBooking = searchParams.get('new') === 'true';
   const hasInitialDeepLink = Boolean(initialBookingRef || initialServiceDate);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -1144,6 +1145,7 @@ export default function BookingsPage() {
       {isModalOpen && (
         <BookingForm 
           onClose={() => setIsModalOpen(false)}
+          initialSelectedProductId={initialSelectedProductId}
         />
       )}
 

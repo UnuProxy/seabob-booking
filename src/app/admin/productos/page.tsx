@@ -121,13 +121,14 @@ export default function ProductsPage() {
                   <div className="font-semibold text-gray-900">
                     €{formatPrice(getProductBaseDailyPrice(product))} <span className="text-gray-500 font-normal">/ día</span>
                   </div>
-                  <div className="mt-1 text-xs text-gray-500">Precio sin IVA</div>
-                  <div className="mt-2 text-sm font-semibold text-emerald-700">
-                    Total: €{formatPrice(getProductDailyPrice(product))} <span className="font-normal">/ día</span>
-                  </div>
                   <div className="mt-1 text-xs text-gray-500">
-                    {product.incluir_iva ? 'IVA incluido (+21%)' : 'Con IVA (+21%)'}
+                    {product.incluir_iva ? 'Precio con IVA incluido' : 'Precio sin IVA'}
                   </div>
+                  {product.incluir_iva ? (
+                    <div className="mt-2 text-sm font-semibold text-emerald-700">
+                      Total: €{formatPrice(getProductDailyPrice(product))} <span className="font-normal">/ día</span>
+                    </div>
+                  ) : null}
                   {getConfiguredMonths(product).length > 0 && (
                     <div className="mt-3">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-500">

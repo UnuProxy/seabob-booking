@@ -196,6 +196,25 @@ export default function PublicBookingPage() {
   }, [items, products, dayCount, startDate]);
 
   const total = rentalTotal;
+  const vatSummaryLabel = useMemo(() => {
+    const selectedProducts = items
+      .map((item) => products.find((product) => product.id === item.producto_id))
+      .filter((product): product is Product => Boolean(product));
+
+    if (selectedProducts.length === 0) {
+      return '';
+    }
+
+    if (selectedProducts.every((product) => product.incluir_iva)) {
+      return 'Precio con IVA incluido';
+    }
+
+    if (selectedProducts.some((product) => product.incluir_iva)) {
+      return 'Incluye IVA en los productos marcados';
+    }
+
+    return 'Precio sin IVA';
+  }, [items, products]);
 
   const updateQuantity = (productId: string, delta: number) => {
     setQuantities((prev) => {
@@ -923,9 +942,11 @@ export default function PublicBookingPage() {
                 <div className="text-xs text-slate-500 mt-2 space-y-1">
                   <div>Alquiler: €{formatPrice(rentalTotal)}</div>
                 </div>
-                <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-2">
-                  Los precios se muestran sin IVA por defecto. Si un producto lleva IVA, se indica como IVA incluido (+21%).
-                </p>
+                {vatSummaryLabel ? (
+                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-2">
+                    {vatSummaryLabel}
+                  </p>
+                ) : null}
                 <p className="text-xs text-slate-400 mt-1">
                   Precio sujeto a disponibilidad y confirmación final.
                 </p>

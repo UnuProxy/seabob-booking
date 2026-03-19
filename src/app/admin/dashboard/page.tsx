@@ -359,10 +359,14 @@ export default function DashboardPage() {
                 <div className="mt-4 flex items-end justify-between gap-3">
                   <div>
                     <p className="text-2xl font-bold text-slate-900">{formatPrice(getProductBaseDailyPrice(product))}</p>
-                    <p className="text-xs text-slate-500">Precio sin IVA</p>
-                    <p className="mt-2 text-sm font-semibold text-emerald-700">
-                      Total: {formatPrice(getProductDailyPrice(product))}
+                    <p className="text-xs text-slate-500">
+                      {product.incluir_iva ? 'Precio con IVA incluido' : 'Precio sin IVA'}
                     </p>
+                    {product.incluir_iva ? (
+                      <p className="mt-2 text-sm font-semibold text-emerald-700">
+                        Total: {formatPrice(getProductDailyPrice(product))}
+                      </p>
+                    ) : null}
                   </div>
                   <span className="text-sm font-medium text-blue-600">Ver info</span>
                 </div>
@@ -399,23 +403,25 @@ export default function DashboardPage() {
                   {selectedProduct.descripcion || 'Sin descripción disponible.'}
                 </p>
                 <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-sm text-slate-500">Precio estandar sin IVA por dia</p>
+                  <p className="text-sm text-slate-500">
+                    {selectedProduct.incluir_iva ? 'Precio por dia con IVA incluido' : 'Precio por dia sin IVA'}
+                  </p>
                   <p className="mt-1 text-3xl font-bold text-slate-900">
                     {formatPrice(getProductBaseDailyPrice(selectedProduct))}
                   </p>
-                  <p className="mt-4 text-sm text-slate-500">Total con IVA por dia</p>
-                  <p className="mt-1 text-3xl font-bold text-emerald-700">
-                    {formatPrice(getProductDailyPrice(selectedProduct))}
-                  </p>
-                  <p className="mt-2 text-xs text-slate-500">
-                    {selectedProduct.incluir_iva
-                      ? 'El total ya incluye IVA (+21%).'
-                      : 'Referencia visual del total con IVA (+21%).'}
-                  </p>
+                  {selectedProduct.incluir_iva ? (
+                    <>
+                      <p className="mt-4 text-sm text-slate-500">Total por dia</p>
+                      <p className="mt-1 text-3xl font-bold text-emerald-700">
+                        {formatPrice(getProductDailyPrice(selectedProduct))}
+                      </p>
+                      <p className="mt-2 text-xs text-slate-500">IVA incluido (+21%).</p>
+                    </>
+                  ) : null}
                 </div>
                 <div className="mt-auto pt-6">
                   <Link
-                    href="/admin/reservas?new=true"
+                    href={`/admin/reservas?new=true&productId=${selectedProduct.id}`}
                     className="btn-primary w-full justify-center"
                     onClick={() => setSelectedProduct(null)}
                   >

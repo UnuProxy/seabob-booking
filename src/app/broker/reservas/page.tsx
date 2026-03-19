@@ -39,6 +39,7 @@ function getDate(dateValue: any): Date {
 export default function BrokerReservasPage() {
   const { user } = useAuthStore();
   const searchParams = useSearchParams();
+  const initialSelectedProductId = searchParams.get('productId')?.trim() ?? '';
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [products, setProducts] = useState<Record<string, Product>>({});
   const [loading, setLoading] = useState(true);
@@ -450,6 +451,7 @@ export default function BrokerReservasPage() {
       {isModalOpen && (
         <BookingForm
           onClose={() => setIsModalOpen(false)}
+          initialSelectedProductId={initialSelectedProductId}
         />
       )}
 
