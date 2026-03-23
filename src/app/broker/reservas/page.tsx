@@ -5,11 +5,12 @@ import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, doc,
 import { db } from '@/lib/firebase/config';
 import { Booking, Product } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
+import { NauticalLicenseManager } from '@/components/bookings/NauticalLicenseManager';
+import { BOOKING_FORM_MODAL_OPEN_KEY, clearBookingDraftStorage } from '@/lib/bookingDraft';
 import { useAuthStore } from '@/store/authStore';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { useSearchParams } from 'next/navigation';
 import { 
-  CalendarDays, 
   Plus, 
   Search, 
   Filter, 
@@ -27,10 +28,17 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
 
-function getDate(dateValue: any): Date {
+function getDate(dateValue: unknown): Date {
   if (!dateValue) return new Date();
   if (dateValue instanceof Date) return dateValue;
-  if (dateValue?.toDate) return dateValue.toDate();
+  if (
+    typeof dateValue === 'object' &&
+    dateValue !== null &&
+    'toDate' in dateValue &&
+    typeof (dateValue as { toDate?: () => Date }).toDate === 'function'
+  ) {
+    return (dateValue as { toDate: () => Date }).toDate();
+  }
   if (typeof dateValue === 'string') return new Date(dateValue);
   if (typeof dateValue === 'number') return new Date(dateValue);
   return new Date();
@@ -40,6 +48,8 @@ export default function BrokerReservasPage() {
   const { user } = useAuthStore();
   const searchParams = useSearchParams();
   const initialSelectedProductId = searchParams.get('productId')?.trim() ?? '';
+  const shouldOpenNewBooking = searchParams.get('new') === 'true';
+  const initialViewingBookingId = searchParams.get('id')?.trim() ?? '';
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [products, setProducts] = useState<Record<string, Product>>({});
   const [loading, setLoading] = useState(true);
@@ -47,23 +57,57 @@ export default function BrokerReservasPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(shouldOpenNewBooking);
+  const [prefillProductId, setPrefillProductId] = useState(shouldOpenNewBooking ? initialSelectedProductId : '');
+  const [viewingBookingId, setViewingBookingId] = useState(initialViewingBookingId);
 
-  // Check if we should open the form modal
+  async function expireBookingIfNeeded(booking: Booking) {
+    if (!booking.expiracion) return;
+    if (booking.pago_realizado || booking.acuerdo_firmado) return;
+    if (booking.expirado || booking.estado === 'expirada') return;
+
+    const expirationDate = getDate(booking.expiracion);
+    if (new Date() <= expirationDate) return;
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        estado: 'expirada',
+        expirado: true,
+        updated_at: serverTimestamp(),
+      });
+      await releaseBookingStockOnce(booking.id, 'system_expiration');
+    } catch (error) {
+      console.error('Error expiring booking:', error);
+    }
+  }
+
   useEffect(() => {
-    if (searchParams.get('new') === 'true') {
+    const shouldRestoreModal = window.sessionStorage.getItem(BOOKING_FORM_MODAL_OPEN_KEY) === 'true';
+    if (shouldRestoreModal) {
       setIsModalOpen(true);
+      setPrefillProductId('');
     }
-    if (searchParams.get('id')) {
-      // Fetch and show booking details
-      const bookingId = searchParams.get('id');
-      const booking = bookings.find(b => b.id === bookingId);
-      if (booking) {
-        setViewingBooking(booking);
-      }
+  }, []);
+
+  useEffect(() => {
+    if (isModalOpen) {
+      window.sessionStorage.setItem(BOOKING_FORM_MODAL_OPEN_KEY, 'true');
+      return;
     }
-  }, [searchParams, bookings]);
+
+    window.sessionStorage.removeItem(BOOKING_FORM_MODAL_OPEN_KEY);
+  }, [isModalOpen]);
+
+  const openNewBookingModal = (productId = '') => {
+    setPrefillProductId(productId);
+    setIsModalOpen(true);
+  };
+
+  const closeNewBookingModal = () => {
+    clearBookingDraftStorage();
+    setPrefillProductId('');
+    setIsModalOpen(false);
+  };
 
   // Fetch products for reference
   useEffect(() => {
@@ -159,26 +203,6 @@ export default function BrokerReservasPage() {
     alert('Enlace del contrato copiado al portapapeles');
   };
 
-  const expireBookingIfNeeded = async (booking: Booking) => {
-    if (!booking.expiracion) return;
-    if (booking.pago_realizado || booking.acuerdo_firmado) return;
-    if (booking.expirado || booking.estado === 'expirada') return;
-
-    const expirationDate = getDate(booking.expiracion);
-    if (new Date() <= expirationDate) return;
-
-    try {
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        estado: 'expirada',
-        expirado: true,
-        updated_at: serverTimestamp(),
-      });
-      await releaseBookingStockOnce(booking.id, 'system_expiration');
-    } catch (error) {
-      console.error('Error expiring booking:', error);
-    }
-  };
-
   const handleCancelBooking = async (booking: Booking) => {
     if (!confirm(`¿Estás seguro de que deseas cancelar la reserva ${booking.numero_reserva}?\n\nEsto cambiará el estado a "cancelada" pero mantendrá el registro.`)) {
       return;
@@ -216,6 +240,10 @@ export default function BrokerReservasPage() {
 
     return matchesSearch && matchesStatus && matchesDateRange;
   });
+
+  const viewingBooking = viewingBookingId
+    ? bookings.find((booking) => booking.id === viewingBookingId) || null
+    : null;
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -256,7 +284,7 @@ export default function BrokerReservasPage() {
           <p className="text-slate-600">Gestiona las reservas que has creado.</p>
         </div>
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => openNewBookingModal()}
           className="btn-primary"
         >
           <Plus size={20} />
@@ -416,7 +444,7 @@ export default function BrokerReservasPage() {
                         <Share2 size={18} />
                       </button>
                       <button
-                        onClick={() => setViewingBooking(booking)}
+                        onClick={() => setViewingBookingId(booking.id)}
                         className="btn-icon text-slate-600 hover:bg-blue-50 hover:text-blue-600"
                         title="Ver detalles"
                       >
@@ -450,8 +478,8 @@ export default function BrokerReservasPage() {
       {/* Booking Form Modal */}
       {isModalOpen && (
         <BookingForm
-          onClose={() => setIsModalOpen(false)}
-          initialSelectedProductId={initialSelectedProductId}
+          onClose={closeNewBookingModal}
+          initialSelectedProductId={prefillProductId}
         />
       )}
 
@@ -462,7 +490,7 @@ export default function BrokerReservasPage() {
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
               <h2 className="text-2xl font-bold text-slate-900">Detalles de la Reserva</h2>
               <button
-                onClick={() => setViewingBooking(null)}
+                onClick={() => setViewingBookingId('')}
                 className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-100"
               >
                 <XCircle size={24} />
@@ -501,7 +529,18 @@ export default function BrokerReservasPage() {
                     const product = products[item.producto_id];
                     return (
                       <div key={idx} className="flex justify-between">
-                        <span className="text-sm text-slate-800">{product?.nombre || 'Producto desconocido'} x{item.cantidad}</span>
+                        <div>
+                          <span className="text-sm text-slate-800">{product?.nombre || 'Producto desconocido'} x{item.cantidad}</span>
+                          {(item.instructor_requested || item.fuel_requested || item.nautical_license_required) && (
+                            <div className="text-xs text-slate-500 mt-1">
+                              {item.instructor_requested ? 'Monitor incluido' : ''}
+                              {item.instructor_requested && item.fuel_requested ? ' · ' : ''}
+                              {item.fuel_requested ? 'Fuel incluido' : ''}
+                              {(item.instructor_requested || item.fuel_requested) && item.nautical_license_required ? ' · ' : ''}
+                              {item.nautical_license_required ? 'Requiere licencia náutica' : ''}
+                            </div>
+                          )}
+                        </div>
                         <span className="text-sm font-semibold text-slate-700">{item.tipo_alquiler === 'dia' ? `${item.duracion} día(s)` : `${item.duracion} hora(s)`}</span>
                       </div>
                     );
@@ -516,6 +555,7 @@ export default function BrokerReservasPage() {
                     viewingBooking.ubicacion_entrega === 'marina_ibiza' ? 'Marina Ibiza' :
                     viewingBooking.ubicacion_entrega === 'marina_botafoch' ? 'Marina Botafoch' :
                     viewingBooking.ubicacion_entrega === 'club_nautico' ? 'Club Náutico' :
+                    viewingBooking.ubicacion_entrega === 'otro' ? (viewingBooking.ubicacion_entrega_detalle || 'Otro') :
                     viewingBooking.ubicacion_entrega || 'No especificado'
                   }</p>
                   {viewingBooking.nombre_barco && (
@@ -533,6 +573,15 @@ export default function BrokerReservasPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-semibold text-slate-500 uppercase">Total</label>
+                  <div className="text-sm text-slate-500 space-y-1 mb-1">
+                    <div>Alquiler: €{Number(viewingBooking.precio_alquiler || viewingBooking.precio_total || 0).toFixed(2)}</div>
+                    {Number(viewingBooking.instructor_total || 0) > 0 && (
+                      <div>Monitor: €{Number(viewingBooking.instructor_total || 0).toFixed(2)}</div>
+                    )}
+                    {Number(viewingBooking.fuel_total || 0) > 0 && (
+                      <div>Fuel: €{Number(viewingBooking.fuel_total || 0).toFixed(2)}</div>
+                    )}
+                  </div>
                   <p className="text-2xl font-bold text-slate-900 flex items-center gap-1">
                     <Euro size={24} />
                     {viewingBooking.precio_total.toFixed(2)}
@@ -552,6 +601,8 @@ export default function BrokerReservasPage() {
                   <p className="text-sm text-slate-700 bg-slate-50 rounded-lg p-4">{viewingBooking.notas}</p>
                 </div>
               )}
+
+              <NauticalLicenseManager booking={viewingBooking} />
             </div>
           </div>
         </div>

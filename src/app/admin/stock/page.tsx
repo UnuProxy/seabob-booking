@@ -5,6 +5,7 @@ import { collection, query, where, getDocs, doc, setDoc, serverTimestamp, writeB
 import { db } from '@/lib/firebase/config';
 import { Product, DailyStock } from '@/types';
 import { useAuthStore } from '@/store/authStore';
+import { getProductTypeLabel } from '@/lib/productTypes';
 import { Calendar, Save, AlertCircle, Loader2, ChevronLeft, ChevronRight, Layers, X } from 'lucide-react';
 import { format, addDays, subDays, eachDayOfInterval, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -287,7 +288,7 @@ export default function DailyStockPage() {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-gray-500 uppercase tracking-wide font-medium">{product.tipo}</p>
+                    <p className="text-sm text-gray-500 uppercase tracking-wide font-medium">{getProductTypeLabel(product.tipo)}</p>
                     {noStockSet && (
                       <p className="text-xs text-orange-600 font-semibold mt-1 flex items-center gap-1">
                         <AlertCircle size={14} /> Establece el stock total para este día
@@ -300,7 +301,7 @@ export default function DailyStockPage() {
                   <div className="text-center">
                     <p className="text-xs text-gray-500 mb-1 font-medium uppercase">Disponibles Ahora</p>
                     <span className={clsx(
-                      "font-mono text-2xl font-bold px-4 py-2 rounded-lg border-2 block min-w-[4rem]",
+                      "font-mono text-2xl font-bold px-4 py-2 rounded-lg border-2 block min-w-16",
                       isOutOfStock && "bg-red-100 border-red-300 text-red-700",
                       isLowStock && "bg-yellow-100 border-yellow-300 text-yellow-700",
                       !isOutOfStock && !isLowStock && "bg-green-100 border-green-300 text-green-700"
@@ -311,7 +312,7 @@ export default function DailyStockPage() {
 
                   <div className="text-center">
                     <p className="text-xs text-gray-500 mb-1 font-medium uppercase">Reservados</p>
-                    <span className="font-mono text-lg font-medium text-gray-700 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 block text-center min-w-[3rem]">
+                    <span className="font-mono text-lg font-medium text-gray-700 bg-gray-50 px-4 py-2 rounded-lg border border-gray-200 block text-center min-w-12">
                       {stock.cantidad_reservada || 0}
                     </span>
                   </div>

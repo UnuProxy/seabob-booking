@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react';
 import {
   collection,
   doc,
@@ -363,6 +363,7 @@ const CONTRACT_COPY = {
 } as const;
 
 type Language = 'es' | 'en';
+type SignaturePointerEvent = ReactMouseEvent<HTMLCanvasElement> | ReactTouchEvent<HTMLCanvasElement>;
 
 const LOCATION_LABELS = {
   marina_ibiza: { es: 'Marina Ibiza', en: 'Marina Ibiza' },
@@ -398,6 +399,8 @@ export default function ContractPage() {
   const [paymentSyncAttempted, setPaymentSyncAttempted] = useState(false);
   const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
   const [paymentLinkError, setPaymentLinkError] = useState<string | null>(null);
+  const getErrorMessage = (error: unknown) =>
+    typeof error === 'object' && error && 'message' in error ? String((error as { message?: unknown }).message || '') : '';
   const totalToPay = booking ? booking.precio_total : 0;
   const requiresPayment = booking?.requires_payment !== false;
 
@@ -507,8 +510,8 @@ export default function ContractPage() {
       }
 
       setBooking((prev) => (prev ? { ...prev, stripe_payment_link: data.url } : prev));
-    } catch (err: any) {
-      setPaymentLinkError(err?.message || copy.payment.generateError);
+    } catch (err: unknown) {
+      setPaymentLinkError(getErrorMessage(err) || copy.payment.generateError);
     } finally {
       setCreatingPaymentLink(false);
     }
@@ -539,13 +542,21 @@ export default function ContractPage() {
     fetchProducts();
   }, [booking]);
 
-  const getDate = (timestamp: any): Date => {
+  const getDate = (timestamp: unknown): Date => {
     if (!timestamp) return new Date();
-    if (timestamp && typeof timestamp.toDate === 'function') {
-      return timestamp.toDate();
+    if (
+      typeof timestamp === 'object' &&
+      timestamp !== null &&
+      'toDate' in timestamp &&
+      typeof (timestamp as { toDate?: () => Date }).toDate === 'function'
+    ) {
+      return (timestamp as { toDate: () => Date }).toDate();
     }
     if (timestamp instanceof Date) {
       return timestamp;
+    }
+    if (typeof timestamp !== 'string' && typeof timestamp !== 'number') {
+      return new Date();
     }
     const date = new Date(timestamp);
     if (isNaN(date.getTime())) {
@@ -590,12 +601,14 @@ export default function ContractPage() {
     return item.producto_id || copy.labels.notProvided;
   };
 
-  const getLocationLabel = (value?: Booking['ubicacion_entrega']) => {
+  const getLocationLabel = (booking?: Booking | null) => {
+    const value = booking?.ubicacion_entrega;
     if (!value) return copy.labels.notProvided;
+    if (value === 'otro') return booking?.ubicacion_entrega_detalle || LOCATION_LABELS.otro?.[lang] || value;
     return LOCATION_LABELS[value]?.[lang] || value;
   };
 
-  const getErrorMessage = () => {
+  const getPageErrorMessage = () => {
     if (!errorKey) return '';
     switch (errorKey) {
       case 'invalid':
@@ -617,18 +630,22 @@ export default function ContractPage() {
     ? Math.max(1, differenceInDays(new Date(booking.fecha_fin), new Date(booking.fecha_inicio)))
     : 1;
 
-  const getCoordinates = (e: any, canvas: HTMLCanvasElement) => {
+  const getCoordinates = (e: SignaturePointerEvent, canvas: HTMLCanvasElement) => {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
-    let clientX, clientY;
-    if (e.touches && e.touches[0]) {
+    let clientX: number;
+    let clientY: number;
+    if ('touches' in e && e.touches[0]) {
       clientX = e.touches[0].clientX;
       clientY = e.touches[0].clientY;
-    } else {
+    } else if ('clientX' in e && 'clientY' in e) {
       clientX = e.clientX;
       clientY = e.clientY;
+    } else {
+      clientX = rect.left;
+      clientY = rect.top;
     }
 
     return {
@@ -637,7 +654,7 @@ export default function ContractPage() {
     };
   };
 
-  const startDrawing = (e: any) => {
+  const startDrawing = (e: SignaturePointerEvent) => {
     e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -654,7 +671,7 @@ export default function ContractPage() {
     ctx.moveTo(offsetX, offsetY);
   };
 
-  const draw = (e: any) => {
+  const draw = (e: SignaturePointerEvent) => {
     if (!isDrawing) return;
     e.preventDefault();
     const canvas = canvasRef.current;
@@ -732,7 +749,7 @@ export default function ContractPage() {
   if (errorKey) {
     return (
       <div className="min-h-screen flex items-center justify-center text-red-600 font-bold px-4 text-center">
-        {getErrorMessage()}
+        {getPageErrorMessage()}
       </div>
     );
   }
@@ -749,7 +766,7 @@ export default function ContractPage() {
   if (success && !printMode && !adminView) {
     const successMessage = copy.success.body.replace('{name}', booking.cliente.nombre);
     const successDate = format(new Date(booking.fecha_inicio), getDateFormat(), { locale });
-    const successLocation = getLocationLabel(booking.ubicacion_entrega);
+    const successLocation = getLocationLabel(booking);
     const successStep3 = copy.success.step3
       .replace('{location}', successLocation)
       .replace('{date}', successDate);
@@ -884,7 +901,7 @@ export default function ContractPage() {
                   {copy.labels.location}
                 </span>
                 <span className="font-bold text-gray-900 text-lg">
-                  {getLocationLabel(booking.ubicacion_entrega)}
+                  {getLocationLabel(booking)}
                 </span>
               </div>
               {booking.hora_entrega && (
@@ -926,18 +943,49 @@ export default function ContractPage() {
               </div>
               {booking.items.map((item, idx) => (
                 <div key={idx} className="flex justify-between items-center text-sm">
-                  <span className="font-medium text-gray-900">
-                    {item.cantidad}x {getProductName(item)}
-                  </span>
+                  <div>
+                    <span className="font-medium text-gray-900">
+                      {item.cantidad}x {getProductName(item)}
+                    </span>
+                    {(item.instructor_requested || item.fuel_requested || item.nautical_license_required) && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        {item.instructor_requested ? (lang === 'es' ? 'Monitor incluido' : 'Instructor included') : ''}
+                        {item.instructor_requested && item.fuel_requested ? ' · ' : ''}
+                        {item.fuel_requested ? (lang === 'es' ? 'Fuel incluido' : 'Fuel included') : ''}
+                        {(item.instructor_requested || item.fuel_requested) && item.nautical_license_required ? ' · ' : ''}
+                        {item.nautical_license_required
+                          ? lang === 'es'
+                            ? 'Licencia náutica requerida'
+                            : 'Nautical licence required'
+                          : ''}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
               <div className="border-t border-gray-200 pt-3 mt-3 space-y-2 text-sm">
                 <div className="flex justify-between items-center text-gray-700">
                   <span>{copy.labels.rentalTotal}</span>
                   <span>
-                    €{booking.precio_total.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                    €{Number(booking.precio_alquiler || booking.precio_total || 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                   </span>
                 </div>
+                {Number(booking.instructor_total || 0) > 0 && (
+                  <div className="flex justify-between items-center text-gray-700">
+                    <span>{lang === 'es' ? 'Monitor' : 'Instructor'}</span>
+                    <span>
+                      €{Number(booking.instructor_total || 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+                {Number(booking.fuel_total || 0) > 0 && (
+                  <div className="flex justify-between items-center text-gray-700">
+                    <span>{lang === 'es' ? 'Fuel' : 'Fuel'}</span>
+                    <span>
+                      €{Number(booking.fuel_total || 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
               </div>
               <div className="border-t border-gray-200 pt-3 mt-3 flex justify-between items-center">
                 <span className="font-bold text-gray-900">{copy.labels.totalToPay}</span>
@@ -945,6 +993,17 @@ export default function ContractPage() {
                   €{totalToPay.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                 </span>
               </div>
+              {booking.nautical_license_required && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                  {booking.nautical_license_url
+                    ? lang === 'es'
+                      ? 'La licencia náutica del cliente ya está registrada.'
+                      : 'The client nautical licence is already on file.'
+                    : lang === 'es'
+                      ? 'Esta reserva requiere licencia náutica del cliente. Se puede añadir más tarde desde el panel.'
+                      : 'This booking requires the client nautical licence. It can be added later from the back office.'}
+                </div>
+              )}
               {booking.notas && (
                 <div className="text-sm text-gray-600">
                   <span className="font-semibold text-gray-800">{copy.labels.notes}:</span> {booking.notas}

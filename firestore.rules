@@ -117,13 +117,35 @@ service cloud.firestore {
             || resource.data.creado_por == request.auth.uid
           )
           && request.resource.data.diff(resource.data).changedKeys()
-            .hasOnly(['estado', 'updated_at', 'expirado', 'stock_released', 'stock_released_at'])
+            .hasOnly([
+              'estado',
+              'updated_at',
+              'expirado',
+              'stock_released',
+              'stock_released_at',
+              'nautical_license_url',
+              'nautical_license_path',
+              'nautical_license_name',
+              'nautical_license_type',
+              'nautical_license_uploaded_at'
+            ])
         )
         || (
           signedIn()
           && resource.data.creado_por == request.auth.uid
           && request.resource.data.diff(resource.data).changedKeys()
-            .hasOnly(['estado', 'updated_at', 'expirado', 'stock_released', 'stock_released_at'])
+            .hasOnly([
+              'estado',
+              'updated_at',
+              'expirado',
+              'stock_released',
+              'stock_released_at',
+              'nautical_license_url',
+              'nautical_license_path',
+              'nautical_license_name',
+              'nautical_license_type',
+              'nautical_license_uploaded_at'
+            ])
         );
 
       allow delete: if isStaff() || (signedIn() && resource.data.creado_por == request.auth.uid);

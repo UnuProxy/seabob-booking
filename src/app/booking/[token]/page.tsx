@@ -16,8 +16,16 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { getProductDailyPrice, getProductVatShortLabel } from '@/lib/productPricing';
+import {
+  doesBookingItemRequireNauticalLicense,
+  getBookingDayCount,
+  getBookingItemFuelTotal,
+  getBookingItemInstructorTotal,
+  hasFuelOption,
+  hasInstructorOption,
+} from '@/lib/bookingExtras';
 import { BookingItem, BookingLink, Product, User as AppUser } from '@/types';
-import { addDays, differenceInDays, format, eachDayOfInterval } from 'date-fns';
+import { addDays, format, eachDayOfInterval } from 'date-fns';
 import {
   Anchor,
   CalendarDays,
@@ -39,11 +47,16 @@ export default function PublicBookingPage() {
   const params = useParams();
   const token = params?.token as string;
   const formatPrice = (amount: number) => amount.toLocaleString('es-ES', { maximumFractionDigits: 0 });
+  const getErrorMessage = (error: unknown) =>
+    typeof error === 'object' && error && 'message' in error ? String((error as { message?: unknown }).message || '') : '';
 
   const [link, setLink] = useState<BookingLink | null>(null);
   const [creatorUser, setCreatorUser] = useState<AppUser | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [productOptions, setProductOptions] = useState<
+    Record<string, { instructor_requested: boolean; fuel_requested: boolean }>
+  >({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -64,6 +77,7 @@ export default function PublicBookingPage() {
   const minDateStr = format(minDate, 'yyyy-MM-dd');
   const [startDate, setStartDate] = useState(minDateStr);
   const [endDate, setEndDate] = useState(minDateStr);
+  const [isMultiDay, setIsMultiDay] = useState(false);
 
   const [deliveryLocation, setDeliveryLocation] = useState<
     'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro'
@@ -162,6 +176,19 @@ export default function PublicBookingPage() {
       });
       return next;
     });
+
+    setProductOptions((prev) => {
+      const next = { ...prev };
+      products.forEach((product) => {
+        if (product.id && next[product.id] === undefined) {
+          next[product.id] = {
+            instructor_requested: false,
+            fuel_requested: false,
+          };
+        }
+      });
+      return next;
+    });
   }, [products]);
 
   useEffect(() => {
@@ -170,11 +197,13 @@ export default function PublicBookingPage() {
     }
   }, [startDate, endDate]);
 
-  const dayCount = useMemo(() => {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    return Math.max(1, differenceInDays(end, start));
-  }, [startDate, endDate]);
+  useEffect(() => {
+    if (!isMultiDay) {
+      setEndDate(startDate);
+    }
+  }, [isMultiDay, startDate]);
+
+  const dayCount = useMemo(() => getBookingDayCount(startDate, endDate), [startDate, endDate]);
 
   const items: BookingItem[] = useMemo(() => {
     return Object.entries(quantities)
@@ -184,8 +213,10 @@ export default function PublicBookingPage() {
         cantidad: qty,
         tipo_alquiler: 'dia',
         duracion: dayCount,
+        instructor_requested: Boolean(productOptions[productId]?.instructor_requested),
+        fuel_requested: Boolean(productOptions[productId]?.fuel_requested),
       }));
-  }, [quantities, dayCount]);
+  }, [quantities, dayCount, productOptions]);
 
   const rentalTotal = useMemo(() => {
     return items.reduce((acc, item) => {
@@ -195,7 +226,33 @@ export default function PublicBookingPage() {
     }, 0);
   }, [items, products, dayCount, startDate]);
 
-  const total = rentalTotal;
+  const instructorTotal = useMemo(
+    () =>
+      items.reduce((acc, item) => {
+        const product = products.find((p) => p.id === item.producto_id);
+        return acc + getBookingItemInstructorTotal(item, product, dayCount);
+      }, 0),
+    [items, products, dayCount]
+  );
+
+  const fuelTotal = useMemo(
+    () =>
+      items.reduce((acc, item) => {
+        const product = products.find((p) => p.id === item.producto_id);
+        return acc + getBookingItemFuelTotal(item, product, dayCount);
+      }, 0),
+    [items, products, dayCount]
+  );
+
+  const total = rentalTotal + instructorTotal + fuelTotal;
+  const nauticalLicenseRequired = useMemo(
+    () =>
+      items.some((item) => {
+        const product = products.find((p) => p.id === item.producto_id);
+        return doesBookingItemRequireNauticalLicense(item, product);
+      }),
+    [items, products]
+  );
   const vatSummaryLabel = useMemo(() => {
     const selectedProducts = items
       .map((item) => products.find((product) => product.id === item.producto_id))
@@ -221,6 +278,21 @@ export default function PublicBookingPage() {
       const nextValue = Math.max(0, (prev[productId] || 0) + delta);
       return { ...prev, [productId]: nextValue };
     });
+  };
+
+  const updateProductOption = (
+    productId: string,
+    field: 'instructor_requested' | 'fuel_requested',
+    value: boolean
+  ) => {
+    setProductOptions((prev) => ({
+      ...prev,
+      [productId]: {
+        instructor_requested: Boolean(prev[productId]?.instructor_requested),
+        fuel_requested: Boolean(prev[productId]?.fuel_requested),
+        [field]: value,
+      },
+    }));
   };
 
   const validateStockAvailability = async () => {
@@ -309,6 +381,8 @@ export default function PublicBookingPage() {
 
       const itemsWithNames = items.map((item) => {
         const product = products.find((p) => p.id === item.producto_id);
+        const instructorTotalForItem = getBookingItemInstructorTotal(item, product, dayCount);
+        const fuelTotalForItem = getBookingItemFuelTotal(item, product, dayCount);
         return {
           ...item,
           producto_nombre: product?.nombre || item.producto_id,
@@ -318,6 +392,14 @@ export default function PublicBookingPage() {
               : getProductDailyPrice(product, startDate),
           comision_percent: product?.comision || 0,
           deposito_unitario: 0,
+          instructor_requested: hasInstructorOption(product) ? Boolean(item.instructor_requested) : false,
+          instructor_price_per_day: Number(product?.instructor_price_per_day || 0),
+          instructor_incluir_iva: Boolean(product?.instructor_incluir_iva),
+          instructor_total: instructorTotalForItem,
+          fuel_requested: hasFuelOption(product) ? Boolean(item.fuel_requested) : false,
+          fuel_price_per_day: Number(product?.fuel_price_per_day || 0),
+          fuel_total: fuelTotalForItem,
+          nautical_license_required: doesBookingItemRequireNauticalLicense(item, product),
         };
       });
 
@@ -333,9 +415,7 @@ export default function PublicBookingPage() {
       const getItemSubtotal = (item: BookingItem, product?: Product) => {
         if (!product) return 0;
         if (item.tipo_alquiler === 'dia') {
-          const start = new Date(startDate);
-          const end = new Date(endDate);
-          const days = Math.max(1, differenceInDays(end, start));
+          const days = getBookingDayCount(startDate, endDate);
           return getProductDailyPrice(product, startDate) * days * item.cantidad;
         }
         return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
@@ -369,7 +449,11 @@ export default function PublicBookingPage() {
         items: itemsWithNames,
         fecha_inicio: startDate,
         fecha_fin: endDate,
-        precio_total: rentalTotal,
+        precio_total: total,
+        precio_alquiler: rentalTotal,
+        instructor_total: instructorTotal,
+        fuel_total: fuelTotal,
+        nautical_license_required: nauticalLicenseRequired,
         deposito_total: 0,
         estado: 'pendiente',
         acuerdo_firmado: false,
@@ -474,7 +558,7 @@ export default function PublicBookingPage() {
             );
           }
 
-          const linkUpdates: Record<string, any> = {
+          const linkUpdates: Record<string, unknown> = {
             reservas_creadas: (linkData.reservas_creadas || 0) + 1,
             ultimo_acceso: serverTimestamp(),
           };
@@ -487,9 +571,10 @@ export default function PublicBookingPage() {
 
           tx.update(linkRef, linkUpdates);
         });
-      } catch (transactionError: any) {
-        if (transactionError?.message?.startsWith('STOCK:')) {
-          const [, productName, availableRaw] = transactionError.message.split(':');
+      } catch (transactionError: unknown) {
+        const transactionMessage = getErrorMessage(transactionError);
+        if (transactionMessage.startsWith('STOCK:')) {
+          const [, productName, availableRaw] = transactionMessage.split(':');
           const available = Number(availableRaw);
           const message =
             available <= 0
@@ -500,17 +585,17 @@ export default function PublicBookingPage() {
           return;
         }
 
-        if (transactionError?.message === 'LINK_INVALID') {
+        if (transactionMessage === 'LINK_INVALID') {
           setError('Este enlace no es válido.');
           setSubmitting(false);
           return;
         }
-        if (transactionError?.message === 'LINK_INACTIVE') {
+        if (transactionMessage === 'LINK_INACTIVE') {
           setError('Este enlace está desactivado.');
           setSubmitting(false);
           return;
         }
-        if (transactionError?.message === 'LINK_USED') {
+        if (transactionMessage === 'LINK_USED') {
           setError('Este enlace ya fue utilizado.');
           setSubmitting(false);
           return;
@@ -679,15 +764,25 @@ export default function PublicBookingPage() {
                   1
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900">Fechas del alquiler</h2>
-                  <p className="text-sm text-slate-500">Elige cuándo quieres disfrutar del SeaBob.</p>
+                  <h2 className="text-lg font-bold text-slate-900">Fechas</h2>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <label className="inline-flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={isMultiDay}
+                    onChange={(e) => setIsMultiDay(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Varios dias
+                </label>
+
+                <div className={`grid grid-cols-1 gap-6 ${isMultiDay ? 'md:grid-cols-2' : ''}`}>
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
-                    <CalendarDays size={18} /> Fecha inicio
+                    <CalendarDays size={18} /> Inicio
                   </span>
                   <input
                     type="date"
@@ -703,27 +798,30 @@ export default function PublicBookingPage() {
                     required
                   />
                 </label>
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
-                    <CalendarDays size={18} /> Fecha fin
-                  </span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    min={startDate < minDateStr ? minDateStr : startDate}
-                    onChange={(e) => {
-                      const nextDate = e.target.value || startDate;
-                      setEndDate(nextDate < startDate ? startDate : nextDate);
-                    }}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
-                    required
-                  />
-                </label>
+                  {isMultiDay ? (
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
+                        <CalendarDays size={18} /> Fin
+                      </span>
+                      <input
+                        type="date"
+                        value={endDate}
+                        min={startDate < minDateStr ? minDateStr : startDate}
+                        onChange={(e) => {
+                          const nextDate = e.target.value || startDate;
+                          setEndDate(nextDate < startDate ? startDate : nextDate);
+                        }}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                        required={isMultiDay}
+                      />
+                    </label>
+                  ) : null}
+                </div>
               </div>
 
-              <div className="mt-4 inline-flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-semibold">
+              <div className="mt-2 inline-flex items-center gap-2 bg-blue-50 text-blue-700 px-4 py-2 rounded-full text-sm font-semibold">
                 <CalendarDays size={16} />
-                Duración: {dayCount} {dayCount === 1 ? 'día' : 'días'}
+                {dayCount} {dayCount === 1 ? 'día' : 'días'}
               </div>
               {isPastCutoff && (
                 <div className="mt-2 inline-flex items-center gap-2 bg-amber-50 text-amber-700 px-4 py-2 rounded-full text-xs font-semibold">
@@ -749,48 +847,125 @@ export default function PublicBookingPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {products.map((product) => {
+              {products.map((product) => {
                     const qty = quantities[product.id || ''] || 0;
+                    const canAddInstructor = hasInstructorOption(product);
+                    const canAddFuel = hasFuelOption(product);
+                    const optionState = productOptions[product.id || ''] || {
+                      instructor_requested: false,
+                      fuel_requested: false,
+                    };
+                    const itemPreview: BookingItem = {
+                      producto_id: product.id || '',
+                      cantidad: Math.max(1, qty || 1),
+                      tipo_alquiler: 'dia',
+                      duracion: dayCount,
+                      instructor_requested: optionState.instructor_requested,
+                      fuel_requested: optionState.fuel_requested,
+                    };
+                    const instructorPreview = getBookingItemInstructorTotal(itemPreview, product, dayCount);
+                    const fuelPreview = getBookingItemFuelTotal(itemPreview, product, dayCount);
+                    const requiresLicense = qty > 0 && doesBookingItemRequireNauticalLicense(itemPreview, product);
                     return (
                       <div
                         key={product.id}
-                        className="border border-slate-200 rounded-2xl p-4 flex gap-4 items-center shadow-sm hover:shadow-md transition-shadow"
+                        className="border border-slate-200 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow"
                       >
-                        <div className="h-16 w-16 rounded-xl bg-slate-100 overflow-hidden flex items-center justify-center">
-                          {product.imagen_url ? (
-                            <img
-                              src={product.imagen_url}
-                              alt={product.nombre}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <ShoppingBag size={24} className="text-slate-400" />
-                          )}
+                        <div className="flex gap-4 items-center">
+                          <div className="h-16 w-16 rounded-xl bg-slate-100 overflow-hidden flex items-center justify-center">
+                            {product.imagen_url ? (
+                              <img
+                                src={product.imagen_url}
+                                alt={product.nombre}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <ShoppingBag size={24} className="text-slate-400" />
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <h3 className="font-semibold text-slate-900">{product.nombre}</h3>
+                            <p className="text-sm text-slate-500">€{formatPrice(getProductDailyPrice(product, startDate))}/día</p>
+                            <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-1">
+                              {getProductVatShortLabel(product)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => product.id && updateQuantity(product.id, -1)}
+                              className="btn-icon h-9 w-9 border border-slate-200 text-slate-500 hover:bg-slate-50"
+                            >
+                              <Minus size={16} />
+                            </button>
+                            <div className="min-w-[32px] text-center font-semibold text-slate-900">{qty}</div>
+                            <button
+                              type="button"
+                              onClick={() => product.id && updateQuantity(product.id, 1)}
+                              className="btn-icon h-9 w-9 border border-blue-200 text-blue-600 hover:bg-blue-50"
+                            >
+                              <Plus size={16} />
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-slate-900">{product.nombre}</h3>
-                          <p className="text-sm text-slate-500">€{formatPrice(getProductDailyPrice(product, startDate))}/día</p>
-                          <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-1">
-                            {getProductVatShortLabel(product)}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => product.id && updateQuantity(product.id, -1)}
-                            className="btn-icon h-9 w-9 border border-slate-200 text-slate-500 hover:bg-slate-50"
-                          >
-                            <Minus size={16} />
-                          </button>
-                          <div className="min-w-[32px] text-center font-semibold text-slate-900">{qty}</div>
-                          <button
-                            type="button"
-                            onClick={() => product.id && updateQuantity(product.id, 1)}
-                            className="btn-icon h-9 w-9 border border-blue-200 text-blue-600 hover:bg-blue-50"
-                          >
-                            <Plus size={16} />
-                          </button>
-                        </div>
+
+                        {(canAddInstructor || canAddFuel) && (
+                          <div className="mt-4 grid gap-3 md:grid-cols-2">
+                            {canAddInstructor && product.id && (
+                              <label className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+                                <div className="flex items-start gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={optionState.instructor_requested}
+                                    onChange={(e) =>
+                                      updateProductOption(product.id as string, 'instructor_requested', e.target.checked)
+                                    }
+                                    className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <div>
+                                    <div className="font-semibold text-slate-900">Añadir monitor/instructor</div>
+                                    <div className="text-xs text-slate-500">
+                                      €{formatPrice(
+                                        Number(product.instructor_price_per_day || 0) *
+                                          (product.instructor_incluir_iva ? 1.21 : 1)
+                                      )}/día por unidad
+                                      {product.instructor_incluir_iva ? ' (IVA incl.)' : ''}
+                                      {qty > 0 && instructorPreview > 0 ? ` · Total €${formatPrice(instructorPreview)}` : ''}
+                                    </div>
+                                  </div>
+                                </div>
+                              </label>
+                            )}
+
+                            {canAddFuel && product.id && (
+                              <label className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm">
+                                <div className="flex items-start gap-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={optionState.fuel_requested}
+                                    onChange={(e) =>
+                                      updateProductOption(product.id as string, 'fuel_requested', e.target.checked)
+                                    }
+                                    className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <div>
+                                    <div className="font-semibold text-slate-900">Añadir fuel/combustible</div>
+                                    <div className="text-xs text-slate-500">
+                                      €{formatPrice(Number(product.fuel_price_per_day || 0))}/día por unidad
+                                      {qty > 0 && fuelPreview > 0 ? ` · Total €${formatPrice(fuelPreview)}` : ''}
+                                    </div>
+                                  </div>
+                                </div>
+                              </label>
+                            )}
+                          </div>
+                        )}
+
+                        {requiresLicense && (
+                          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                            Sin monitor en este producto: la licencia náutica del cliente será obligatoria. Puede añadirse más tarde.
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -941,10 +1116,17 @@ export default function PublicBookingPage() {
                 </div>
                 <div className="text-xs text-slate-500 mt-2 space-y-1">
                   <div>Alquiler: €{formatPrice(rentalTotal)}</div>
+                  {instructorTotal > 0 && <div>Monitor: €{formatPrice(instructorTotal)}</div>}
+                  {fuelTotal > 0 && <div>Fuel: €{formatPrice(fuelTotal)}</div>}
                 </div>
                 {vatSummaryLabel ? (
                   <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-2">
                     {vatSummaryLabel}
+                  </p>
+                ) : null}
+                {nauticalLicenseRequired ? (
+                  <p className="text-xs text-amber-700 mt-2">
+                    Si reservas sin monitor, la licencia náutica del cliente será necesaria, pero no hace falta subirla ahora.
                   </p>
                 ) : null}
                 <p className="text-xs text-slate-400 mt-1">

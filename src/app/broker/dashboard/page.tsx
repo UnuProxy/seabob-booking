@@ -11,6 +11,7 @@ import { Plus, Eye, Share2, Calendar, Euro, Wallet, ArrowRight, Package, X } fro
 import Link from 'next/link';
 import { usePartnerCommissions } from '@/lib/firebase/hooks/usePartnerCommissions';
 import { getProductBaseDailyPrice, getProductDailyPrice } from '@/lib/productPricing';
+import { getProductTypeLabel } from '@/lib/productTypes';
 
 function getDate(dateValue: any): Date {
   if (!dateValue) return new Date();
@@ -352,7 +353,7 @@ export default function BrokerDashboard() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-lg font-semibold text-slate-900">{product.nombre}</h3>
-                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{product.tipo}</p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{getProductTypeLabel(product.tipo)}</p>
                   </div>
                   <span className={`rounded-full px-2 py-1 text-xs font-semibold ${product.activo ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
                     {product.activo ? 'Activo' : 'Inactivo'}
