@@ -5,6 +5,7 @@ import { Product } from '@/types';
 import { collection, onSnapshot, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { SEASONAL_PRICE_MONTHS, getProductBaseDailyPrice, getProductDailyPrice } from '@/lib/productPricing';
+import { getProductTypeLabel } from '@/lib/productTypes';
 import { Edit, Trash2 } from 'lucide-react';
 import { ProductForm } from '@/components/products/ProductForm';
 
@@ -107,7 +108,7 @@ export default function ProductsPage() {
                     <h3 className="text-lg font-bold text-gray-900 hover:underline">{product.nombre}</h3>
                   </button>
                   <span className="text-xs uppercase text-gray-500 font-semibold tracking-wider">
-                    {product.tipo}
+                    {getProductTypeLabel(product.tipo)}
                   </span>
                 </div>
               </div>
@@ -148,6 +149,19 @@ export default function ProductsPage() {
                   )}
                   {product.precio_hora && product.precio_hora > 0 && (
                     <div className="text-gray-500">€{product.precio_hora} / hora</div>
+                  )}
+                  {Number(product.instructor_price_per_day || 0) > 0 && (
+                    <div className="text-gray-500">
+                      Monitor: €{formatPrice(
+                        Number(product.instructor_price_per_day || 0) * (product.instructor_incluir_iva ? 1.21 : 1)
+                      )} / día
+                      {product.instructor_incluir_iva ? ' (IVA incl.)' : ''}
+                    </div>
+                  )}
+                  {Number(product.fuel_price_per_day || 0) > 0 && (
+                    <div className="text-gray-500">
+                      Fuel: €{formatPrice(Number(product.fuel_price_per_day || 0))} / día
+                    </div>
                   )}
                 </div>
                 

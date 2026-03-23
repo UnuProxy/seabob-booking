@@ -1,6 +1,6 @@
 export type UserRole = 'admin' | 'colaborador' | 'delivery' | 'broker' | 'agency';
 export type EntityType = 'individual' | 'broker' | 'agency';
-export type ProductType = 'seabob' | 'jetski' | 'servicio';
+export type ProductType = 'seabob' | 'jetski' | 'tabla' | 'seascooter' | 'servicio';
 export type RentalType = 'hora' | 'dia';
 export type BookingStatus = 'pendiente' | 'confirmada' | 'completada' | 'cancelada' | 'expirada';
 export type SeasonalPriceMonth =
@@ -54,6 +54,9 @@ export interface Product {
   precios_por_mes?: Partial<Record<SeasonalPriceMonth, number>>;
   incluir_iva?: boolean;
   precio_hora?: number; // Optional hourly rate
+  instructor_price_per_day?: number;
+  instructor_incluir_iva?: boolean;
+  fuel_price_per_day?: number;
   deposito?: number; // Refundable deposit amount
   comision: number; // Percentage (e.g., 15 = 15%)
   tipo: ProductType;
@@ -83,6 +86,14 @@ export interface BookingItem {
   precio_unitario?: number;
   comision_percent?: number; // Store the commission rate at time of booking
   deposito_unitario?: number; // Refundable deposit per unit
+  instructor_requested?: boolean;
+  instructor_price_per_day?: number;
+  instructor_incluir_iva?: boolean;
+  instructor_total?: number;
+  fuel_requested?: boolean;
+  fuel_price_per_day?: number;
+  fuel_total?: number;
+  nautical_license_required?: boolean;
 }
 
 export interface Booking {
@@ -113,6 +124,15 @@ export interface Booking {
   terminos_aceptados?: boolean;
   terminos_aceptados_en?: Date | string;
   precio_total: number;
+  precio_alquiler?: number;
+  instructor_total?: number;
+  fuel_total?: number;
+  nautical_license_required?: boolean;
+  nautical_license_url?: string;
+  nautical_license_path?: string;
+  nautical_license_name?: string;
+  nautical_license_type?: string;
+  nautical_license_uploaded_at?: Date | string;
   
   // Payment tracking
   requires_payment?: boolean;

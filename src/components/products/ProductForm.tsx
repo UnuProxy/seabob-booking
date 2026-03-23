@@ -75,6 +75,9 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
       const productData: Record<string, unknown> = {
         ...formData,
         precio_diario: fallbackDailyPrice,
+        instructor_price_per_day: Number(formData.instructor_price_per_day) || 0,
+        instructor_incluir_iva: Boolean(formData.instructor_incluir_iva),
+        fuel_price_per_day: Number(formData.fuel_price_per_day) || 0,
         precios_por_mes: Object.fromEntries(
           SEASONAL_PRICE_MONTHS.map(({ key }) => {
             const value = formData.precios_por_mes?.[key];
@@ -201,208 +204,327 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white w-full h-[100svh] sm:h-auto sm:max-h-[90vh] sm:max-w-2xl rounded-none sm:rounded-lg flex flex-col">
+      <div className="bg-white w-full h-svh sm:h-auto sm:max-h-[90vh] sm:max-w-4xl rounded-none sm:rounded-3xl flex flex-col shadow-2xl">
         <div className="sticky top-0 z-10 bg-white p-4 sm:p-6 border-b border-gray-200 flex justify-between items-center">
-          <h2 className="text-xl font-bold text-gray-800">
-            {productToEdit ? 'Editar Producto' : 'Nuevo Producto'}
-          </h2>
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">
+              {productToEdit ? 'Editar Producto' : 'Nuevo Producto'}
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Datos claros y precios en un solo vistazo.
+            </p>
+          </div>
           <button onClick={onClose} className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-100">
             <X size={24} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Producto</label>
-              <input
-                type="text"
-                required
-                value={formData.nombre}
-                onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
-                placeholder="ej. SeaBob F5 SR"
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
-              <textarea
-                rows={3}
-                value={formData.descripcion}
-                onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-              <select
-                value={formData.tipo}
-                onChange={(e) => setFormData({ ...formData, tipo: e.target.value as ProductType })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
-              >
-                <option value="seabob">SeaBob</option>
-                <option value="jetski">Jet Ski</option>
-                <option value="servicio">Servicio Adicional</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
-              <select
-                value={formData.activo ? 'true' : 'false'}
-                onChange={(e) => setFormData({ ...formData, activo: e.target.value === 'true' })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
-              >
-                <option value="true">Activo</option>
-                <option value="false">Inactivo</option>
-              </select>
-            </div>
-
-            <div className="flex items-start gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-3">
-              <input
-                id="incluir-iva"
-                type="checkbox"
-                checked={Boolean(formData.incluir_iva)}
-                onChange={(e) => setFormData({ ...formData, incluir_iva: e.target.checked })}
-                className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-slate-50">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <label htmlFor="incluir-iva" className="block text-sm font-medium text-gray-800">
-                  Incluir IVA (+21%) en este producto
-                </label>
-                <p className="text-xs text-gray-500 mt-1">
-                  Desactivado: sin IVA por defecto. Activado: los precios se muestran y se calculan con IVA incluido.
-                </p>
+                <h3 className="text-lg font-bold text-slate-900">Básico</h3>
+                <p className="text-sm text-slate-500">Nombre, tipo y estado.</p>
               </div>
             </div>
 
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Precios por Mes (€ / día) sin IVA por defecto
-              </label>
-              <p className="text-xs text-gray-500 mb-3">
-                Solo introduces precios por mes. Todos se guardan sin IVA por defecto.
-              </p>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                {SEASONAL_PRICE_MONTHS.map(({ key, label }) => (
-                  <div key={key}>
-                    <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={formData.precios_por_mes?.[key] ?? ''}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          precios_por_mes: {
-                            ...formData.precios_por_mes,
-                            [key]: e.target.value === '' ? undefined : Number(e.target.value),
-                          },
-                        })
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
-                      placeholder="0"
-                      inputMode="numeric"
-                    />
-                    {formData.precios_por_mes?.[key] !== undefined && Number(formData.precios_por_mes?.[key]) > 0 && (
-                      <p className="text-xs font-medium text-emerald-700 mt-2">
-                        Con IVA (+21%): €
-                        {Math.round(Number(formData.precios_por_mes?.[key]) * 1.21).toLocaleString('es-ES', {
-                          maximumFractionDigits: 0,
-                        })}
-                      </p>
-                    )}
-                  </div>
-                ))}
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del Producto</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.nombre}
+                  onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                  placeholder="ej. SeaBob F5 SR"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
+                <textarea
+                  rows={3}
+                  value={formData.descripcion}
+                  onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                  placeholder="Descripción breve"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                <select
+                  value={formData.tipo}
+                  onChange={(e) => setFormData({ ...formData, tipo: e.target.value as ProductType })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                >
+                  <option value="seabob">SeaBob</option>
+                  <option value="jetski">Jet Ski</option>
+                  <option value="tabla">Efoil</option>
+                  <option value="seascooter">Seascooter</option>
+                  <option value="servicio">Servicio Adicional</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Estado</label>
+                <select
+                  value={formData.activo ? 'true' : 'false'}
+                  onChange={(e) => setFormData({ ...formData, activo: e.target.value === 'true' })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                >
+                  <option value="true">Activo</option>
+                  <option value="false">Inactivo</option>
+                </select>
               </div>
             </div>
+          </section>
 
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Comisión Broker/Agencia (%)
-              </label>
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="1"
-                value={formData.comision ?? ''}
-                onChange={(e) => setFormData({ ...formData, comision: e.target.value === '' ? undefined : Number(e.target.value) })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-black"
-                placeholder="ej. 15"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Porcentaje que se paga a brokers/agencias cuando reservan este producto.
-              </p>
-              {formData.comision !== undefined && formData.comision > 0 && (
-                <p className="text-xs text-green-600 mt-1 font-medium">
-                  Ejemplo: en una reserva de €{examplePrice}, la comisión sería €{exampleCommission}
-                </p>
-              )}
+              <h3 className="text-lg font-bold text-slate-900">Precios</h3>
+              <p className="text-sm text-slate-500">IVA y precios por mes.</p>
             </div>
 
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Imagen</label>
-              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
-                <div className="flex items-start justify-between gap-3">
+            <div className="mt-5 space-y-5">
+              <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
+                <input
+                  id="incluir-iva"
+                  type="checkbox"
+                  checked={Boolean(formData.incluir_iva)}
+                  onChange={(e) => setFormData({ ...formData, incluir_iva: e.target.checked })}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <label htmlFor="incluir-iva" className="block text-sm font-medium text-gray-800">
+                    Incluir IVA (+21%) en este producto
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Actívalo si este producto ya debe mostrarse con IVA incluido.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Precios por Mes (€ / día)
+                </label>
+                <p className="text-xs text-gray-500 mb-3">
+                  Introduce solo los meses que uses.
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {SEASONAL_PRICE_MONTHS.map(({ key, label }) => (
+                    <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <label className="block text-xs font-semibold text-gray-600 mb-2">{label}</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={formData.precios_por_mes?.[key] ?? ''}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            precios_por_mes: {
+                              ...formData.precios_por_mes,
+                              [key]: e.target.value === '' ? undefined : Number(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
+                        placeholder="0"
+                        inputMode="numeric"
+                      />
+                      {formData.precios_por_mes?.[key] !== undefined && Number(formData.precios_por_mes?.[key]) > 0 && (
+                        <p className="text-xs font-medium text-emerald-700 mt-2">
+                          IVA: €
+                          {Math.round(Number(formData.precios_por_mes?.[key]) * 1.21).toLocaleString('es-ES', {
+                            maximumFractionDigits: 0,
+                          })}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Extras y comisión</h3>
+              <p className="text-sm text-slate-500">Comisión, monitor y fuel.</p>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Comisión Broker/Agencia (%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={formData.comision ?? ''}
+                  onChange={(e) => setFormData({ ...formData, comision: e.target.value === '' ? undefined : Number(e.target.value) })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                  placeholder="ej. 15"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Comisión para brokers/agencias.
+                </p>
+                {formData.comision !== undefined && formData.comision > 0 && (
+                  <p className="text-xs text-green-600 mt-2 font-medium">
+                    Ejemplo: €{exampleCommission} por una reserva de €{examplePrice}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Monitor / Instructor (€ / día)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.instructor_price_per_day ?? ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        instructor_price_per_day: e.target.value === '' ? undefined : Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                    placeholder="0"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Precio del monitor por día.
+                  </p>
+                </div>
+
+                <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(formData.instructor_incluir_iva)}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        instructor_incluir_iva: e.target.checked,
+                      })
+                    }
+                    className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
                   <div>
-                    <p className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                      <ImageUp size={18} className="text-slate-600" />
-                      Subir imagen
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      JPG/PNG/WebP. Máx. 6MB.
-                    </p>
+                    <span className="block text-sm font-medium text-gray-800">
+                      Incluir IVA (+21%) en monitor
+                    </span>
+                    <span className="block text-xs text-gray-500 mt-1">
+                      El monitor se guardará con IVA incluido.
+                    </span>
                   </div>
-                  {imageFile && (
+                </label>
+
+                {formData.instructor_price_per_day !== undefined && Number(formData.instructor_price_per_day) > 0 && formData.instructor_incluir_iva ? (
+                  <p className="text-xs font-medium text-emerald-700">
+                    Monitor con IVA: €
+                    {Math.round(Number(formData.instructor_price_per_day) * 1.21).toLocaleString('es-ES', {
+                      maximumFractionDigits: 0,
+                    })}
+                    / día
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Fuel / Combustible (€ / día)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formData.fuel_price_per_day ?? ''}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      fuel_price_per_day: e.target.value === '' ? undefined : Number(e.target.value),
+                    })
+                  }
+                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                  placeholder="0"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Precio del combustible por día.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">Imagen</h3>
+              <p className="text-sm text-slate-500">Sube o reemplaza la foto del producto.</p>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                    <ImageUp size={18} className="text-slate-600" />
+                    Subir imagen
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    JPG/PNG/WebP. Máx. 6MB.
+                  </p>
+                </div>
+                {imageFile && (
+                  <button
+                    type="button"
+                    onClick={() => setImageFile(null)}
+                    className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-white"
+                    title="Quitar imagen seleccionada"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setImageFile(file);
+                  if (file) setRemoveCurrentImage(false);
+                }}
+                className="mt-3 block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-slate-800"
+              />
+
+              {productToEdit?.imagen_url && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-slate-500">
+                    {imageFile
+                      ? 'La imagen actual se reemplazará al guardar.'
+                      : removeCurrentImage
+                        ? 'La imagen actual se eliminará al guardar.'
+                        : 'Este producto ya tiene una imagen guardada.'}
+                  </p>
+                  {!imageFile && (
                     <button
                       type="button"
-                      onClick={() => setImageFile(null)}
-                      className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-white"
-                      title="Quitar imagen seleccionada"
+                      onClick={() => setRemoveCurrentImage((prev) => !prev)}
+                      className="text-xs font-semibold text-rose-700 hover:text-rose-800 underline"
                     >
-                      <X size={18} />
+                      {removeCurrentImage ? 'Cancelar eliminación de imagen' : 'Eliminar imagen actual'}
                     </button>
                   )}
                 </div>
-
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0] || null;
-                    setImageFile(file);
-                    if (file) setRemoveCurrentImage(false);
-                  }}
-                  className="mt-3 block w-full text-sm text-slate-700 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-slate-800"
-                />
-
-                {productToEdit?.imagen_url && (
-                  <div className="mt-2 space-y-2">
-                    <p className="text-xs text-slate-500">
-                      {imageFile
-                        ? 'La imagen actual se reemplazará al guardar.'
-                        : removeCurrentImage
-                          ? 'La imagen actual se eliminará al guardar.'
-                          : 'Este producto ya tiene una imagen guardada. Sube otra para reemplazarla o elimínala.'}
-                    </p>
-                    {!imageFile && (
-                      <button
-                        type="button"
-                        onClick={() => setRemoveCurrentImage((prev) => !prev)}
-                        className="text-xs font-semibold text-rose-700 hover:text-rose-800 underline"
-                      >
-                        {removeCurrentImage ? 'Cancelar eliminación de imagen' : 'Eliminar imagen actual'}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+              )}
             </div>
-          </div>
+          </section>
 
           <div className="sticky bottom-0 -mx-4 sm:mx-0 mt-2 bg-white border-t border-gray-200 px-4 sm:px-0 pt-4 pb-4 sm:pb-0">
             <div className="flex flex-col-reverse sm:flex-row justify-end gap-3">

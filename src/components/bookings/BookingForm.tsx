@@ -3,11 +3,20 @@
 import { useState, useEffect } from 'react';
 import { collection, getDocs, query, where, serverTimestamp, doc, getDoc, increment, runTransaction } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { Product, BookingItem, RentalType, DailyStock, User as AppUser } from '@/types';
-import { getProductDailyPrice, getProductVatShortLabel } from '@/lib/productPricing';
+import { Product, BookingItem, DailyStock, User as AppUser } from '@/types';
+import { getProductDailyPrice } from '@/lib/productPricing';
+import { BOOKING_FORM_DRAFT_KEY, clearBookingDraftStorage } from '@/lib/bookingDraft';
+import {
+  doesBookingItemRequireNauticalLicense,
+  getBookingDayCount,
+  getBookingItemFuelTotal,
+  getBookingItemInstructorTotal,
+  hasFuelOption,
+  hasInstructorOption,
+} from '@/lib/bookingExtras';
 import { useAuthStore } from '@/store/authStore';
-import { X, Plus, Trash2, Calendar, User, CreditCard, Save, Loader2, ShoppingBag, MapPin, Anchor, AlertCircle, PackageX } from 'lucide-react';
-import { addDays, format, differenceInDays, eachDayOfInterval } from 'date-fns';
+import { X, Plus, Trash2, Save, Loader2 } from 'lucide-react';
+import { addDays, format, eachDayOfInterval } from 'date-fns';
 
 interface BookingFormProps {
   onClose: () => void;
@@ -15,9 +24,34 @@ interface BookingFormProps {
   initialSelectedProductId?: string;
 }
 
+interface BookingFormDraft {
+  clientName: string;
+  clientEmail: string;
+  clientPhone: string;
+  startDate: string;
+  endDate: string;
+  isMultiDay: boolean;
+  items: BookingItem[];
+  isProductPickerOpen: boolean;
+  currentStep: number;
+  deliveryLocation: 'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro';
+  deliveryLocationDetail: string;
+  boatName: string;
+  dockingNumber: string;
+  deliveryTime: string;
+  notes: string;
+  skipPayment: boolean;
+  partnerType: 'directo' | 'broker' | 'agency' | 'colaborador';
+  partnerId: string;
+}
+
 export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: BookingFormProps) {
   const { user } = useAuthStore();
   const formatPrice = (amount: number) => amount.toLocaleString('es-ES', { maximumFractionDigits: 0 });
+  const getErrorCode = (error: unknown) =>
+    typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code || '') : '';
+  const getErrorMessage = (error: unknown) =>
+    typeof error === 'object' && error && 'message' in error ? String((error as { message?: unknown }).message || '') : '';
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [partners, setPartners] = useState<AppUser[]>([]);
@@ -44,6 +78,10 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const [items, setItems] = useState<BookingItem[]>([]);
   const [isProductPickerOpen, setIsProductPickerOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  const [hasAppliedInitialProduct, setHasAppliedInitialProduct] = useState(false);
+  const [canSubmitStepThree, setCanSubmitStepThree] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  const [hasDraftData, setHasDraftData] = useState(false);
   
   // Delivery Details
   const [deliveryLocation, setDeliveryLocation] = useState<'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro'>('marina_ibiza');
@@ -56,6 +94,125 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const [skipPayment, setSkipPayment] = useState(false);
   const [partnerType, setPartnerType] = useState<'directo' | 'broker' | 'agency' | 'colaborador'>('directo');
   const [partnerId, setPartnerId] = useState('');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const rawDraft = window.sessionStorage.getItem(BOOKING_FORM_DRAFT_KEY);
+      if (!rawDraft) {
+        setHasDraftData(false);
+        return;
+      }
+
+      const draft = JSON.parse(rawDraft) as Partial<BookingFormDraft>;
+
+      setClientName(typeof draft.clientName === 'string' ? draft.clientName : '');
+      setClientEmail(typeof draft.clientEmail === 'string' ? draft.clientEmail : '');
+      setClientPhone(typeof draft.clientPhone === 'string' ? draft.clientPhone : '');
+      setStartDate(typeof draft.startDate === 'string' ? draft.startDate : minDateStr);
+      setEndDate(typeof draft.endDate === 'string' ? draft.endDate : minDateStr);
+      setIsMultiDay(Boolean(draft.isMultiDay));
+      setItems(
+        Array.isArray(draft.items)
+          ? draft.items.map((item) => ({
+              producto_id: typeof item?.producto_id === 'string' ? item.producto_id : '',
+              cantidad: Math.max(1, Number(item?.cantidad || 1)),
+              tipo_alquiler: item?.tipo_alquiler || 'dia',
+              duracion: Math.max(1, Number(item?.duracion || 1)),
+              instructor_requested: Boolean(item?.instructor_requested),
+              fuel_requested: Boolean(item?.fuel_requested),
+            }))
+          : []
+      );
+      setIsProductPickerOpen(Boolean(draft.isProductPickerOpen));
+      setCurrentStep(
+        typeof draft.currentStep === 'number' ? Math.min(3, Math.max(1, draft.currentStep)) : 1
+      );
+      setDeliveryLocation(
+        draft.deliveryLocation === 'marina_ibiza' ||
+          draft.deliveryLocation === 'marina_botafoch' ||
+          draft.deliveryLocation === 'club_nautico' ||
+          draft.deliveryLocation === 'otro'
+          ? draft.deliveryLocation
+          : 'marina_ibiza'
+      );
+      setDeliveryLocationDetail(typeof draft.deliveryLocationDetail === 'string' ? draft.deliveryLocationDetail : '');
+      setBoatName(typeof draft.boatName === 'string' ? draft.boatName : '');
+      setDockingNumber(typeof draft.dockingNumber === 'string' ? draft.dockingNumber : '');
+      setDeliveryTime(typeof draft.deliveryTime === 'string' ? draft.deliveryTime : '09:00');
+      setNotes(typeof draft.notes === 'string' ? draft.notes : '');
+      setSkipPayment(Boolean(draft.skipPayment));
+      setPartnerType(
+        draft.partnerType === 'broker' ||
+          draft.partnerType === 'agency' ||
+          draft.partnerType === 'colaborador' ||
+          draft.partnerType === 'directo'
+          ? draft.partnerType
+          : 'directo'
+      );
+      setPartnerId(typeof draft.partnerId === 'string' ? draft.partnerId : '');
+      setHasDraftData(true);
+    } catch (error) {
+      console.error('Error restoring booking draft:', error);
+      window.sessionStorage.removeItem(BOOKING_FORM_DRAFT_KEY);
+      setHasDraftData(false);
+    } finally {
+      setDraftHydrated(true);
+    }
+  }, [minDateStr]);
+
+  useEffect(() => {
+    if (!draftHydrated || successData) return;
+
+    const draft: BookingFormDraft = {
+      clientName,
+      clientEmail,
+      clientPhone,
+      startDate,
+      endDate,
+      isMultiDay,
+      items,
+      isProductPickerOpen,
+      currentStep,
+      deliveryLocation,
+      deliveryLocationDetail,
+      boatName,
+      dockingNumber,
+      deliveryTime,
+      notes,
+      skipPayment,
+      partnerType,
+      partnerId,
+    };
+
+    try {
+      window.sessionStorage.setItem(BOOKING_FORM_DRAFT_KEY, JSON.stringify(draft));
+    } catch (error) {
+      console.error('Error saving booking draft:', error);
+    }
+  }, [
+    boatName,
+    clientEmail,
+    clientName,
+    clientPhone,
+    currentStep,
+    deliveryLocation,
+    deliveryLocationDetail,
+    deliveryTime,
+    dockingNumber,
+    draftHydrated,
+    endDate,
+    isMultiDay,
+    isProductPickerOpen,
+    items,
+    notes,
+    partnerId,
+    partnerType,
+    skipPayment,
+    startDate,
+    successData,
+  ]);
 
   // Fetch products
   useEffect(() => {
@@ -71,9 +228,9 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         } else {
           setError(''); // Clear any previous errors
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Error fetching products:', err);
-        if (err.code === 'permission-denied') {
+        if (getErrorCode(err) === 'permission-denied') {
           setError('No tienes permiso para ver los productos. Contacta al administrador.');
         } else {
           setError('Error al cargar productos. Verifica tu conexión.');
@@ -161,7 +318,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   }, [startDate, endDate, products]);
 
   useEffect(() => {
-    if (!initialSelectedProductId || items.length > 0) return;
+    if (!draftHydrated || hasDraftData || !initialSelectedProductId || items.length > 0 || hasAppliedInitialProduct) return;
 
     const product = products.find((entry) => entry.id === initialSelectedProductId);
     const stockInfo = product ? productStock[initialSelectedProductId] : null;
@@ -176,9 +333,25 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         cantidad: 1,
         tipo_alquiler: 'dia',
         duracion: 1,
+        instructor_requested: false,
+        fuel_requested: false,
       }
     ]);
-  }, [initialSelectedProductId, items.length, productStock, products]);
+    setHasAppliedInitialProduct(true);
+  }, [draftHydrated, hasAppliedInitialProduct, hasDraftData, initialSelectedProductId, items.length, productStock, products]);
+
+  useEffect(() => {
+    if (currentStep !== 3) {
+      setCanSubmitStepThree(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setCanSubmitStepThree(true);
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [currentStep]);
 
   const addItem = () => {
     if (products.length === 0) return;
@@ -193,13 +366,15 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         cantidad: 1,
         tipo_alquiler: 'dia',
         duracion: 1,
+        instructor_requested: false,
+        fuel_requested: false,
       }
     ]);
     setIsProductPickerOpen(false);
     setError('');
   };
 
-  const updateItem = (index: number, field: keyof BookingItem, value: any) => {
+  const updateItem = (index: number, field: keyof BookingItem, value: BookingItem[keyof BookingItem]) => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
     setItems(newItems);
@@ -212,18 +387,36 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const getItemSubtotal = (item: BookingItem, product?: Product) => {
     if (!product) return 0;
     if (item.tipo_alquiler === 'dia') {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const days = Math.max(1, differenceInDays(end, start));
+      const days = getBookingDayCount(startDate, endDate);
       return getProductDailyPrice(product, startDate) * days * item.cantidad;
     }
     return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
   };
 
+  const getItemInstructorSubtotal = (item: BookingItem, product?: Product) =>
+    getBookingItemInstructorTotal(item, product, getBookingDayCount(startDate, endDate));
+
+  const getItemFuelSubtotal = (item: BookingItem, product?: Product) =>
+    getBookingItemFuelTotal(item, product, getBookingDayCount(startDate, endDate));
+
   const calculateRentalTotal = () => {
     return items.reduce((acc, item) => {
       const product = products.find(p => p.id === item.producto_id);
       return acc + getItemSubtotal(item, product);
+    }, 0);
+  };
+
+  const calculateInstructorTotal = () => {
+    return items.reduce((acc, item) => {
+      const product = products.find((p) => p.id === item.producto_id);
+      return acc + getItemInstructorSubtotal(item, product);
+    }, 0);
+  };
+
+  const calculateFuelTotal = () => {
+    return items.reduce((acc, item) => {
+      const product = products.find((p) => p.id === item.producto_id);
+      return acc + getItemFuelSubtotal(item, product);
     }, 0);
   };
 
@@ -270,7 +463,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const goToNextStep = () => {
     if (!validateStep(currentStep)) return;
     setError('');
-    setCurrentStep((prev) => Math.min(4, prev + 1));
+    setCurrentStep((prev) => Math.min(3, prev + 1));
   };
 
   const goToPreviousStep = () => {
@@ -281,6 +474,11 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (currentStep < 3) {
+      goToNextStep();
+      return;
+    }
+    if (!canSubmitStepThree || loading) return;
     if (!user) return;
     if (!clientName) {
       setError('El nombre del cliente es obligatorio');
@@ -325,11 +523,15 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
       const rentalTotal = calculateRentalTotal();
-      const totalAmount = rentalTotal;
+      const instructorTotal = calculateInstructorTotal();
+      const fuelTotal = calculateFuelTotal();
+      const totalAmount = rentalTotal + instructorTotal + fuelTotal;
       
       // Build items with product names, prices, and commission rates
       const itemsWithNames = items.map((item) => {
         const product = products.find((p) => p.id === item.producto_id);
+        const instructorTotalForItem = getItemInstructorSubtotal(item, product);
+        const fuelTotalForItem = getItemFuelSubtotal(item, product);
         
         return {
           ...item,
@@ -340,8 +542,17 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
               : getProductDailyPrice(product, startDate),
           comision_percent: product?.comision || 0, // Store commission rate at time of booking
           deposito_unitario: 0,
+          instructor_requested: hasInstructorOption(product) ? Boolean(item.instructor_requested) : false,
+          instructor_price_per_day: Number(product?.instructor_price_per_day || 0),
+          instructor_incluir_iva: Boolean(product?.instructor_incluir_iva),
+          instructor_total: instructorTotalForItem,
+          fuel_requested: hasFuelOption(product) ? Boolean(item.fuel_requested) : false,
+          fuel_price_per_day: Number(product?.fuel_price_per_day || 0),
+          fuel_total: fuelTotalForItem,
+          nautical_license_required: doesBookingItemRequireNauticalLicense(item, product),
         };
       });
+      const nauticalLicenseRequired = itemsWithNames.some((item) => item.nautical_license_required);
       
       // Calculate total commission for broker/agency bookings
       let comisionTotal = 0;
@@ -386,7 +597,11 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         items: itemsWithNames,
         fecha_inicio: startDate,
         fecha_fin: endDate,
-        precio_total: rentalTotal,
+        precio_total: totalAmount,
+        precio_alquiler: rentalTotal,
+        instructor_total: instructorTotal,
+        fuel_total: fuelTotal,
+        nautical_license_required: nauticalLicenseRequired,
         deposito_total: 0,
         estado: user.rol === 'admin' && skipPayment ? 'confirmada' : 'pendiente',
         acuerdo_firmado: false,
@@ -485,9 +700,10 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
             );
           }
         });
-      } catch (stockError: any) {
-        if (stockError?.message?.startsWith('STOCK:')) {
-          const [, productName, availableRaw] = stockError.message.split(':');
+      } catch (stockError: unknown) {
+        const stockErrorMessage = getErrorMessage(stockError);
+        if (stockErrorMessage.startsWith('STOCK:')) {
+          const [, productName, availableRaw] = stockErrorMessage.split(':');
           const available = Number(availableRaw);
           const message =
             available <= 0
@@ -540,6 +756,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
 
       const contractUrl = `${window.location.origin}/contract/${bookingId}?t=${token}`;
       const successPayload = { contractUrl, paymentUrl, bookingId };
+      clearBookingDraftStorage();
       setSuccessData(successPayload);
       onSuccess?.(successPayload);
     } catch (err) {
@@ -551,10 +768,9 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   };
 
   const rentalTotal = calculateRentalTotal();
-  const total = rentalTotal;
-  const dayCount = Math.max(1, differenceInDays(new Date(endDate), new Date(startDate)));
-  const userAllowsBookingWithoutPayment =
-    (user?.rol === 'broker' || user?.rol === 'agency') && Boolean(user?.allow_booking_without_payment);
+  const instructorTotal = calculateInstructorTotal();
+  const fuelTotal = calculateFuelTotal();
+  const total = rentalTotal + instructorTotal + fuelTotal;
   const selectedProducts = items
     .map((item) => products.find((product) => product.id === item.producto_id))
     .filter((product): product is Product => Boolean(product));
@@ -566,6 +782,10 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         : selectedProducts.some((product) => product.incluir_iva)
           ? 'Incluye IVA en los productos marcados'
           : 'Precio sin IVA';
+  const requiresLicenseUpload = items.some((item) => {
+    const product = products.find((entry) => entry.id === item.producto_id);
+    return doesBookingItemRequireNauticalLicense(item, product);
+  });
 
   const copyText = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -625,36 +845,26 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col max-h-[96vh]">
-        
-        {/* Header */}
-        <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
-          <div>
-            <h2 className="text-xl font-bold text-gray-800">Nueva Reserva</h2>
-          </div>
-          <button
-            onClick={onClose}
-            className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-200"
-          >
-            <X size={24} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50">
-          {error && (
-            <div className="bg-red-50 text-red-700 p-4 rounded-xl flex items-center gap-2 border border-red-100">
-              <ShoppingBag size={20} />
-              {error}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-0 sm:p-4">
+      <div className="flex h-svh w-full max-w-4xl flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-3xl">
+        <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">Nueva Reserva</h2>
             </div>
-          )}
+            <button
+              onClick={onClose}
+              className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-100"
+            >
+              <X size={24} />
+            </button>
+          </div>
 
-          <div className="grid grid-cols-4 md:grid-cols-4 gap-2">
+          <div className="mt-4 grid grid-cols-3 gap-2">
             {[
               { step: 1, label: 'Cliente' },
-              { step: 2, label: 'Reserva' },
+              { step: 2, label: 'Fecha' },
               { step: 3, label: 'Productos' },
-              { step: 4, label: 'Notas' },
             ].map((item) => (
               <button
                 key={item.step}
@@ -665,173 +875,135 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                     setCurrentStep(item.step);
                   }
                 }}
-                className={`rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                className={`rounded-2xl border px-2 py-3 text-center text-sm font-semibold transition sm:px-3 ${
                   item.step === currentStep
                     ? 'border-slate-900 bg-slate-900 text-white'
                     : item.step < currentStep
-                      ? 'border-slate-200 bg-white text-slate-700'
-                      : 'border-slate-200 bg-slate-100 text-slate-400'
+                      ? 'border-blue-200 bg-blue-50 text-slate-900'
+                      : 'border-slate-200 bg-slate-50 text-slate-400'
                 }`}
               >
-                <span className="md:hidden">{item.step}</span>
-                <span className="hidden md:inline">{item.label}</span>
+                <span className="mr-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/15 text-xs sm:mr-2">
+                  {item.step}
+                </span>
+                {item.label}
               </button>
             ))}
           </div>
+        </div>
 
-          {/* Section 1: Client Info */}
-          {currentStep === 1 && (
-          <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-            <div className="flex items-start gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
-                1
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col bg-slate-50">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 pb-6 sm:p-6">
+            {error && (
+              <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+                {error}
               </div>
-              <div className="flex-1">
-                <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
-                  <User className="text-blue-600" size={20} />
-                  Cliente
-                </h3>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Nombre</label>
-                <input
-                  type="text"
-                  value={clientName}
-                  onChange={e => setClientName(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                  placeholder="Ej: Juan Pérez"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Email</label>
-                <input
-                  type="email"
-                  value={clientEmail}
-                  onChange={e => setClientEmail(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                  placeholder="juan@ejemplo.com"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">Teléfono</label>
-                <input
-                  type="tel"
-                  value={clientPhone}
-                  onChange={e => setClientPhone(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                  placeholder="+34 600 000 000"
-                />
-              </div>
-              <div className="md:col-span-2">
-                {user?.rol === 'admin' ? (
-                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                    {skipPayment
-                      ? 'Reserva confirmada sin pago. Podrás registrar el pago manualmente más adelante.'
-                      : 'Las reservas quedan en estado pendiente hasta recibir el pago completo.'}
+            )}
+
+            {currentStep === 1 && (
+              <div className="space-y-4">
+                <section className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-6">
+                  <h3 className="text-xl font-bold text-slate-900">Cliente</h3>
+                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">Nombre</label>
+                      <input
+                        type="text"
+                        value={clientName}
+                        onChange={(e) => setClientName(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                        placeholder="Nombre"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">Teléfono</label>
+                      <input
+                        type="tel"
+                        value={clientPhone}
+                        onChange={(e) => setClientPhone(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                        placeholder="Teléfono"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">Email</label>
+                      <input
+                        type="email"
+                        value={clientEmail}
+                        onChange={(e) => setClientEmail(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                        placeholder="Email"
+                      />
+                    </div>
                   </div>
-                ) : (
-                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-                    {userAllowsBookingWithoutPayment
-                      ? 'Este partner puede crear reservas sin pago previo. El cliente podrá firmar sin pagar antes.'
-                      : 'Las reservas quedan en estado pendiente hasta recibir el pago completo.'}
-                  </div>
+                </section>
+
+                {user?.rol === 'admin' && (
+                  <section className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-6">
+                    <h3 className="text-xl font-bold text-slate-900">Pago</h3>
+                    <div className="mt-4 space-y-4">
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                        <input
+                          id="skipPayment"
+                          type="checkbox"
+                          checked={skipPayment}
+                          onChange={(event) => setSkipPayment(event.target.checked)}
+                          className="h-5 w-5 rounded border-gray-300 text-slate-900 focus:ring-slate-900/30"
+                        />
+                        <span className="text-base font-semibold text-slate-900">Sin pago ahora</span>
+                      </label>
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-slate-700">Tipo</label>
+                          <select
+                            value={partnerType}
+                            onChange={(event) => {
+                              const nextType = event.target.value as typeof partnerType;
+                              setPartnerType(nextType);
+                              setPartnerId('');
+                            }}
+                            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                          >
+                            <option value="directo">Directo</option>
+                            <option value="broker">Broker</option>
+                            <option value="agency">Agencia</option>
+                            <option value="colaborador">Colaborador</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-slate-700">Nombre</label>
+                          <select
+                            value={partnerId}
+                            onChange={(event) => setPartnerId(event.target.value)}
+                            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                            disabled={partnerType === 'directo'}
+                          >
+                            <option value="">Sin asignar</option>
+                            {partners
+                              .filter((partner) => partner.rol === partnerType)
+                              .map((partner) => (
+                                <option key={partner.id} value={partner.id}>
+                                  {partner.nombre}
+                                  {partner.empresa_nombre ? ` · ${partner.empresa_nombre}` : ''}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
                 )}
               </div>
-            </div>
-          </section>
-          )}
+            )}
 
-          {currentStep === 1 && user?.rol === 'admin' && (
-            <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-              <div className="flex items-start gap-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
-                  <CreditCard className="h-5 w-5" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
-                    Pago y asignacion
-                  </h3>
-                </div>
-              </div>
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex items-center gap-3">
-                  <input
-                    id="skipPayment"
-                    type="checkbox"
-                    checked={skipPayment}
-                    onChange={(event) => setSkipPayment(event.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-900/30"
-                  />
-                  <label htmlFor="skipPayment" className="text-sm font-semibold text-gray-700">
-                    Crear reserva sin pago (no generar enlace Stripe)
-                  </label>
-                </div>
-
-                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {currentStep === 2 && (
+              <section className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-6">
+                <h3 className="text-xl font-bold text-slate-900">Fecha y lugar</h3>
+                <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Asignar a</label>
-                    <select
-                      value={partnerType}
-                      onChange={(event) => {
-                        const nextType = event.target.value as typeof partnerType;
-                        setPartnerType(nextType);
-                        setPartnerId('');
-                      }}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                    >
-                      <option value="directo">Cliente directo</option>
-                      <option value="broker">Broker</option>
-                      <option value="agency">Agencia</option>
-                      <option value="colaborador">Colaborador</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">Entidad</label>
-                    <select
-                      value={partnerId}
-                      onChange={(event) => setPartnerId(event.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                      disabled={partnerType === 'directo'}
-                    >
-                      <option value="">Sin asignar</option>
-                      {partners
-                        .filter((partner) => partner.rol === partnerType)
-                        .map((partner) => (
-                          <option key={partner.id} value={partner.id}>
-                            {partner.nombre}
-                            {partner.empresa_nombre ? ` · ${partner.empresa_nombre}` : ''}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* Section 2: Dates & Details */}
-          {currentStep === 2 && (
-          <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-            <div className="flex items-start gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
-                2
-              </div>
-              <div className="flex-1">
-                <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
-                  <Calendar className="text-blue-600" size={20} />
-                  Reserva
-                </h3>
-              </div>
-            </div>
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className={`grid grid-cols-1 gap-3 ${isMultiDay ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-3'}`}>
-                <div className="md:col-span-2">
-                  <label className="mb-2 block text-sm font-semibold text-gray-700">Inicio</label>
-                  <div className="flex items-center gap-2">
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">Inicio</label>
                     <input
                       type="date"
                       value={startDate}
@@ -842,336 +1014,350 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                         setStartDate(safeDate);
                         setEndDate(safeDate);
                       }}
-                      className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-4 py-3 font-medium text-gray-900 outline-none transition-all focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10"
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
                       required
                     />
-                    <label className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-semibold text-slate-700">
+                  </div>
+                  <div className="flex items-end">
+                    <label className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                       <input
                         type="checkbox"
                         checked={isMultiDay}
                         onChange={(e) => setIsMultiDay(e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-slate-900 focus:ring-slate-900/30"
+                        className="h-5 w-5 rounded border-gray-300 text-slate-900 focus:ring-slate-900/30"
                       />
-                      <span className="hidden sm:inline">Varios dias</span>
+                      <span className="text-base font-semibold text-slate-900">Varios días</span>
                     </label>
-                    <div className="shrink-0 rounded-xl bg-blue-100 px-3 py-3 text-sm font-bold text-blue-700">
-                      {dayCount} {dayCount === 1 ? 'día' : 'días'}
-                    </div>
                   </div>
-                </div>
-                {isMultiDay ? (
+
+                  {isMultiDay ? (
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">Fin</label>
+                      <input
+                        type="date"
+                        value={endDate}
+                        min={startDate < minDateStr ? minDateStr : startDate}
+                        onChange={(e) => {
+                          const nextDate = e.target.value || startDate;
+                          setEndDate(nextDate < startDate ? startDate : nextDate);
+                        }}
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                        required={isMultiDay}
+                      />
+                    </div>
+                  ) : null}
+
                   <div>
-                    <label className="mb-2 block text-sm font-semibold text-gray-700">Fin</label>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">Hora</label>
                     <input
-                      type="date"
-                      value={endDate}
-                      min={startDate < minDateStr ? minDateStr : startDate}
-                      onChange={(e) => {
-                        const nextDate = e.target.value || startDate;
-                        setEndDate(nextDate < startDate ? startDate : nextDate);
-                      }}
-                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-medium text-gray-900 outline-none transition-all focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10"
-                      required={isMultiDay}
+                      type="time"
+                      value={deliveryTime}
+                      onChange={(e) => setDeliveryTime(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                      required
                     />
                   </div>
-                ) : null}
-                <div>
-                   <label className="mb-2 block text-sm font-semibold text-gray-700">Ubicación</label>
-                   <select
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">Lugar</label>
+                    <select
                       value={deliveryLocation}
                       onChange={(e) => {
                         const nextValue = e.target.value as 'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro';
                         setDeliveryLocation(nextValue);
-                        if (nextValue !== 'otro') {
-                          setDeliveryLocationDetail('');
-                        }
+                        if (nextValue !== 'otro') setDeliveryLocationDetail('');
                       }}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
                       required
-                   >
+                    >
                       <option value="marina_ibiza">Marina Ibiza</option>
                       <option value="marina_botafoch">Marina Botafoch</option>
                       <option value="club_nautico">Club Náutico</option>
                       <option value="otro">Otro</option>
-                   </select>
-                </div>
-                {deliveryLocation === 'otro' ? (
-                  <div className="md:col-span-2">
-                    <label className="mb-2 block text-sm font-semibold text-gray-700">Direccion</label>
-                    <textarea
-                      value={deliveryLocationDetail}
-                      onChange={(e) => setDeliveryLocationDetail(e.target.value)}
-                      rows={2}
-                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-medium text-gray-900 outline-none transition-all focus:bg-white focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10"
-                      placeholder="Escribe la direccion de entrega"
-                      required
-                    />
+                    </select>
                   </div>
-                ) : null}
-                <div>
-                   <label className="mb-2 block text-sm font-semibold text-gray-700">Hora</label>
-                   <input
-                      type="time"
-                      value={deliveryTime}
-                      onChange={e => setDeliveryTime(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                      required
-                   />
-                </div>
-                <div>
-                   <label className="mb-2 block text-sm font-semibold text-gray-700">Barco</label>
-                   <input
+
+                  {deliveryLocation === 'otro' ? (
+                    <div className="md:col-span-2">
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">Dirección</label>
+                      <textarea
+                        value={deliveryLocationDetail}
+                        onChange={(e) => setDeliveryLocationDetail(e.target.value)}
+                        rows={2}
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                        placeholder="Dirección"
+                        required
+                      />
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">Barco</label>
+                    <input
                       type="text"
                       value={boatName}
-                      onChange={e => setBoatName(e.target.value)}
-                      placeholder="Ej: Blue Pearl"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                   />
-                </div>
-                <div>
-                   <label className="mb-2 block text-sm font-semibold text-gray-700">Amarre</label>
-                   <input
+                      onChange={(e) => setBoatName(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                      placeholder="Barco"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">Amarre</label>
+                    <input
                       type="text"
                       value={dockingNumber}
-                      onChange={e => setDockingNumber(e.target.value)}
-                      placeholder="Ej: H-12"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none font-medium text-gray-900"
-                   />
-                </div>
+                      onChange={(e) => setDockingNumber(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                      placeholder="Amarre"
+                    />
+                  </div>
                 </div>
 
-              {isPastCutoff && (
-                <p className="mt-3 inline-block rounded-lg border border-amber-100 bg-amber-50 px-3 py-1 text-xs text-amber-700">
-                  Sin reservas hoy despues de las 17:00
-                </p>
-              )}
-            </div>
-          </section>
-          )}
+                {isPastCutoff && (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
+                    Hoy ya no se puede reservar.
+                  </div>
+                )}
+              </section>
+            )}
 
-          {/* Section 3: Items */}
-          {currentStep === 3 && (
-          <section className="rounded-2xl border-2 border-blue-200 bg-blue-50/40 p-4 shadow-sm">
-            <div className="flex justify-between items-center mb-4">
-              <div className="flex items-start gap-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 text-white text-sm font-semibold shadow-sm">
-                  3
-                </div>
-                <div className="flex-1">
-                  <h3 className="flex items-center gap-2 text-lg font-bold text-gray-800">
-                    <ShoppingBag className="text-blue-700" size={20} />
-                    Productos
-                  </h3>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={addItem}
-                className="btn-ghost text-blue-700"
-              >
-                <Plus size={16} /> Añadir producto
-              </button>
-            </div>
+            {currentStep === 3 && (
+              <div className="space-y-4">
+                <section className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-6">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-xl font-bold text-slate-900">Productos</h3>
+                    <button type="button" onClick={addItem} className="btn-primary">
+                      <Plus size={16} />
+                      {isProductPickerOpen ? 'Cerrar' : 'Añadir'}
+                    </button>
+                  </div>
 
-            <div className="space-y-4">
-              {isProductPickerOpen ? (
-                <div className="rounded-xl border border-blue-200 bg-white p-3 shadow-sm">
-                  <div className="mb-2 text-sm font-semibold text-slate-700">Selecciona un producto</div>
-                  <div className="grid gap-2">
-                    {products.map((product) => {
-                      if (!product.id) return null;
+                  {isProductPickerOpen && (
+                    <div className="mt-4 grid gap-3">
+                      {products.map((product) => {
+                        if (!product.id) return null;
+                        const stockInfo = productStock[product.id];
+                        const isOutOfStock = Boolean(stockInfo?.isOutOfStock);
+                        return (
+                          <button
+                            key={product.id}
+                            type="button"
+                            onClick={() => addItemWithProduct(product.id as string)}
+                            disabled={isOutOfStock}
+                            className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left disabled:opacity-50"
+                          >
+                            <div>
+                              <div className="text-lg font-semibold text-slate-900">{product.nombre}</div>
+                              <div className="text-sm text-slate-500">
+                                €{formatPrice(getProductDailyPrice(product, startDate))}/día
+                              </div>
+                            </div>
+                            <div className={`text-sm font-semibold ${isOutOfStock ? 'text-rose-600' : 'text-emerald-700'}`}>
+                              {isOutOfStock ? 'Sin stock' : stockInfo ? `${stockInfo.available}` : ''}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
 
-                      const stockInfo = productStock[product.id];
-                      const isOutOfStock = Boolean(stockInfo?.isOutOfStock);
+                  <div className="mt-4 space-y-4">
+                    {items.map((item, index) => {
+                      const selectedProduct = products.find((p) => p.id === item.producto_id);
+                      const stockInfo = selectedProduct?.id ? productStock[selectedProduct.id] : null;
+                      const canAddInstructor = hasInstructorOption(selectedProduct);
+                      const canAddFuel = hasFuelOption(selectedProduct);
+                      const requiresLicense = doesBookingItemRequireNauticalLicense(item, selectedProduct);
 
                       return (
-                        <button
-                          key={product.id}
-                          type="button"
-                          onClick={() => addItemWithProduct(product.id as string)}
-                          disabled={isOutOfStock}
-                          className="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 text-left transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-400"
-                        >
-                          <div>
-                            <div className="font-medium text-slate-900">{product.nombre}</div>
-                            <div className="text-xs text-slate-500">
-                              €{formatPrice(getProductDailyPrice(product, startDate))}/dia · {getProductVatShortLabel(product)}
+                        <div key={index} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_110px_auto]">
+                            <div>
+                              <label className="mb-2 block text-sm font-semibold text-slate-700">Producto</label>
+                              <select
+                                value={item.producto_id}
+                                onChange={(e) => {
+                                  const nextProduct = products.find((product) => product.id === e.target.value);
+                                  const nextItem: BookingItem = {
+                                    ...item,
+                                    producto_id: e.target.value,
+                                    instructor_requested: hasInstructorOption(nextProduct) ? Boolean(item.instructor_requested) : false,
+                                    fuel_requested: hasFuelOption(nextProduct) ? Boolean(item.fuel_requested) : false,
+                                  };
+                                  const newItems = [...items];
+                                  newItems[index] = nextItem;
+                                  setItems(newItems);
+                                }}
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                              >
+                                <option value="">Selecciona</option>
+                                {products.map((product) => {
+                                  const pStock = product.id ? productStock[product.id] : null;
+                                  const outOfStock = pStock?.isOutOfStock;
+                                  return (
+                                    <option key={product.id} value={product.id} disabled={outOfStock}>
+                                      {product.nombre} - €{formatPrice(getProductDailyPrice(product, startDate))}/día
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="mb-2 block text-sm font-semibold text-slate-700">Cantidad</label>
+                              <input
+                                type="number"
+                                min="1"
+                                max={stockInfo?.available || 999}
+                                value={item.cantidad}
+                                onChange={(e) => updateItem(index, 'cantidad', parseInt(e.target.value))}
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                                disabled={!item.producto_id}
+                              />
+                            </div>
+
+                            <div className="flex items-end">
+                              <button
+                                type="button"
+                                onClick={() => removeItem(index)}
+                                className="btn-outline w-full md:w-auto"
+                              >
+                                <Trash2 size={16} />
+                                Quitar
+                              </button>
                             </div>
                           </div>
-                          <div className={`text-xs font-semibold ${isOutOfStock ? 'text-red-600' : stockInfo?.isLowStock ? 'text-yellow-700' : 'text-green-700'}`}>
-                            {isOutOfStock ? 'Sin stock' : stockInfo ? `${stockInfo.available} disp.` : 'Disponibilidad'}
-                          </div>
-                        </button>
+
+                          {stockInfo?.isLowStock && !stockInfo.isOutOfStock ? (
+                            <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
+                              Poco stock: quedan {stockInfo.available}
+                            </div>
+                          ) : null}
+
+                          {stockInfo?.isOutOfStock ? (
+                            <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+                              Sin stock para estas fechas
+                            </div>
+                          ) : null}
+
+                          {(canAddInstructor || canAddFuel) && (
+                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                              {canAddInstructor && (
+                                <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(item.instructor_requested)}
+                                    onChange={(e) => updateItem(index, 'instructor_requested', e.target.checked)}
+                                    className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <div>
+                                    <div className="font-semibold text-slate-900">Monitor</div>
+                                    <div className="text-sm text-slate-500">
+                                      €{formatPrice(
+                                        Number(selectedProduct?.instructor_price_per_day || 0) *
+                                          (selectedProduct?.instructor_incluir_iva ? 1.21 : 1)
+                                      )}/día
+                                    </div>
+                                  </div>
+                                </label>
+                              )}
+
+                              {canAddFuel && (
+                                <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(item.fuel_requested)}
+                                    onChange={(e) => updateItem(index, 'fuel_requested', e.target.checked)}
+                                    className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <div>
+                                    <div className="font-semibold text-slate-900">Fuel</div>
+                                    <div className="text-sm text-slate-500">
+                                      €{formatPrice(Number(selectedProduct?.fuel_price_per_day || 0))}/día
+                                    </div>
+                                  </div>
+                                </label>
+                              )}
+                            </div>
+                          )}
+
+                          {requiresLicense ? (
+                            <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
+                              Hará falta licencia náutica.
+                            </div>
+                          ) : null}
+                        </div>
                       );
                     })}
+
+                    {!isProductPickerOpen && items.length === 0 ? (
+                      <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-white px-6 py-12 text-center">
+                        <button type="button" onClick={addItem} className="btn-primary">
+                          <Plus size={16} />
+                          Añadir producto
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
+                </section>
+
+                <section className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-6">
+                  <h3 className="text-xl font-bold text-slate-900">Notas</h3>
+                  <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    rows={4}
+                    className="mt-4 w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                    placeholder="Notas"
+                  />
+                </section>
+              </div>
+            )}
+          </div>
+
+          <div className="sticky bottom-0 border-t border-slate-200 bg-white px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:px-6 sm:pb-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-slate-500">{vatSummaryLabel || 'Total'}</div>
+                <div className="mt-1 text-3xl font-bold text-slate-900">
+                  €{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
                 </div>
-              ) : null}
-
-              {items.map((item, index) => {
-                const selectedProduct = products.find(p => p.id === item.producto_id);
-                const stockInfo = selectedProduct?.id ? productStock[selectedProduct.id] : null;
-                const showStockWarning = stockInfo && (stockInfo.isOutOfStock || stockInfo.isLowStock);
-                
-                return (
-                  <div key={index} className="flex flex-col gap-3 bg-white/90 p-3 rounded-xl border-2 border-blue-100 relative group text-gray-900 shadow-sm">
-                    {/* Stock Warning Banner */}
-                    {showStockWarning && (
-                      <div className={`flex items-center gap-2 p-3 rounded-lg ${stockInfo.isOutOfStock ? 'bg-red-50 border border-red-200' : 'bg-yellow-50 border border-yellow-200'}`}>
-                        {stockInfo.isOutOfStock ? (
-                          <>
-                            <PackageX className="text-red-600" size={20} />
-                            <div className="flex-1">
-                              <p className="text-sm font-bold text-red-700">⚠️ SIN STOCK DISPONIBLE</p>
-                              <p className="text-xs text-red-600">Este producto no tiene unidades disponibles para las fechas seleccionadas. Por favor, elige otro producto o cambia las fechas.</p>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <AlertCircle className="text-yellow-600" size={20} />
-                            <div className="flex-1">
-                              <p className="text-sm font-bold text-yellow-700">⚠️ STOCK BAJO</p>
-                              <p className="text-xs text-yellow-600">Quedan solo {stockInfo.available} unidad(es) disponible(s) para estas fechas.</p>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="flex flex-col md:flex-row gap-4 items-start md:items-end">
-                      <div className="flex-1 w-full">
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
-                          Producto
-                          {stockInfo && (
-                            <span className={`ml-2 font-normal ${stockInfo.isOutOfStock ? 'text-red-600' : stockInfo.isLowStock ? 'text-yellow-600' : 'text-green-600'}`}>
-                              ({stockInfo.available} disponibles)
-                            </span>
-                          )}
-                        </label>
-                        <select
-                          value={item.producto_id}
-                          onChange={(e) => updateItem(index, 'producto_id', e.target.value)}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 font-medium"
-                        >
-                          <option value="">Selecciona un producto</option>
-                          {products.map(p => {
-                            const pStock = p.id ? productStock[p.id] : null;
-                            const outOfStock = pStock?.isOutOfStock;
-                            return (
-                              <option key={p.id} value={p.id} disabled={outOfStock}>
-                                {p.nombre} - €{formatPrice(getProductDailyPrice(p, startDate))}/día ({getProductVatShortLabel(p)}) {outOfStock ? '(SIN STOCK)' : pStock ? `(${pStock.available} disp.)` : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                      
-                      <div className="w-full md:w-32">
-                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Cantidad</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max={stockInfo?.available || 999}
-                          value={item.cantidad}
-                          onChange={(e) => updateItem(index, 'cantidad', parseInt(e.target.value))}
-                          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 font-medium"
-                          disabled={!item.producto_id}
-                        />
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => removeItem(index)}
-                        className="btn-icon text-rose-400 hover:text-rose-600 hover:bg-rose-50 absolute top-2 right-2 md:static"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
+                {(instructorTotal > 0 || fuelTotal > 0) && (
+                  <div className="mt-1 text-sm text-slate-500">
+                    {instructorTotal > 0 ? `Monitor €${instructorTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}` : ''}
+                    {instructorTotal > 0 && fuelTotal > 0 ? ' · ' : ''}
+                    {fuelTotal > 0 ? `Fuel €${fuelTotal.toLocaleString('es-ES', { minimumFractionDigits: 2 })}` : ''}
                   </div>
-                );
-              })}
+                )}
+                {requiresLicenseUpload ? (
+                  <div className="mt-2 text-sm font-medium text-amber-700">Hace falta licencia</div>
+                ) : null}
+              </div>
 
-              {!isProductPickerOpen && items.length === 0 ? (
-                <div className="text-center py-8 bg-white/80 border-2 border-dashed border-blue-200 rounded-xl text-gray-600">
-                  Usa “Añadir producto” para abrir la lista.
-                </div>
-              ) : null}
-
+              <div className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:self-end">
+                {currentStep > 1 ? (
+                  <button type="button" onClick={goToPreviousStep} className="btn-outline w-full sm:w-auto">
+                    Atrás
+                  </button>
+                ) : (
+                  <button type="button" onClick={onClose} className="btn-outline w-full sm:w-auto">
+                    Cancelar
+                  </button>
+                )}
+                {currentStep < 3 ? (
+                  <button type="button" onClick={goToNextStep} className="btn-primary w-full sm:w-auto">
+                    Siguiente
+                  </button>
+                ) : (
+                  <button type="submit" disabled={loading || !canSubmitStepThree} className="btn-primary w-full sm:w-auto disabled:opacity-50">
+                    {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                    Crear Reserva
+                  </button>
+                )}
+              </div>
             </div>
-          </section>
-          )}
-          
-          {/* Section 4: Notes */}
-          {currentStep === 4 && (
-          <section className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-             <div className="flex items-start gap-4">
-               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white text-sm font-semibold shadow-sm">
-                 4
-               </div>
-               <div className="flex-1">
-                 <h3 className="text-lg font-bold text-gray-800">Notas Adicionales</h3>
-               </div>
-             </div>
-             <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                className="w-full mt-4 px-4 py-3 rounded-xl border border-gray-200 bg-white focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-900 transition-all outline-none text-gray-900"
-                placeholder="Instrucciones especiales..."
-             />
-          </section>
-          )}
-
+          </div>
         </form>
-
-        {/* Footer */}
-        <div className="px-5 py-4 border-t border-gray-100 bg-white rounded-b-2xl flex items-end justify-between gap-4">
-          <div className="flex flex-col">
-            <span className="text-xs text-gray-500 font-medium">Total</span>
-            {vatSummaryLabel ? (
-              <span className="text-xs text-amber-700 mt-1">{vatSummaryLabel}</span>
-            ) : null}
-            <span className="text-2xl font-bold text-slate-900">€{total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
-          </div>
-
-          <div className="flex gap-3 shrink-0">
-            {currentStep > 1 ? (
-              <button
-                type="button"
-                onClick={goToPreviousStep}
-                className="btn-outline"
-              >
-                Atras
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn-outline"
-              >
-                Cancelar
-              </button>
-            )}
-            {currentStep < 4 ? (
-              <button
-                type="button"
-                onClick={goToNextStep}
-                className="btn-primary"
-              >
-                Siguiente
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={loading}
-                className="btn-primary disabled:opacity-50"
-              >
-                {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
-                Crear Reserva
-              </button>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   );

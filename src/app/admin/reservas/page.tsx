@@ -5,7 +5,9 @@ import { collection, query, orderBy, onSnapshot, doc, where, getDocs, updateDoc,
 import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
+import { NauticalLicenseManager } from '@/components/bookings/NauticalLicenseManager';
 import { PaymentRefundManager } from '@/components/bookings/PaymentRefundManager';
+import { BOOKING_FORM_MODAL_OPEN_KEY, clearBookingDraftStorage } from '@/lib/bookingDraft';
 import { useAuthStore } from '@/store/authStore';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { 
@@ -56,6 +58,7 @@ export default function BookingsPage() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [expandedBookings, setExpandedBookings] = useState<Record<string, boolean>>({});
   const [isModalOpen, setIsModalOpen] = useState(shouldOpenNewBooking);
+  const [prefillProductId, setPrefillProductId] = useState(shouldOpenNewBooking ? initialSelectedProductId : '');
   const [viewingBooking, setViewingBooking] = useState<Booking | null>(null);
   const [paymentManaging, setPaymentManaging] = useState<Booking | null>(null);
 
@@ -75,6 +78,34 @@ export default function BookingsPage() {
 
     return () => window.clearTimeout(syncId);
   }, [searchParams]);
+
+  useEffect(() => {
+    const shouldRestoreModal = window.sessionStorage.getItem(BOOKING_FORM_MODAL_OPEN_KEY) === 'true';
+    if (shouldRestoreModal) {
+      setIsModalOpen(true);
+      setPrefillProductId('');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isModalOpen) {
+      window.sessionStorage.setItem(BOOKING_FORM_MODAL_OPEN_KEY, 'true');
+      return;
+    }
+
+    window.sessionStorage.removeItem(BOOKING_FORM_MODAL_OPEN_KEY);
+  }, [isModalOpen]);
+
+  const openNewBookingModal = (productId = '') => {
+    setPrefillProductId(productId);
+    setIsModalOpen(true);
+  };
+
+  const closeNewBookingModal = () => {
+    clearBookingDraftStorage();
+    setPrefillProductId('');
+    setIsModalOpen(false);
+  };
 
   const getDate = (timestamp: unknown): Date => {
     if (!timestamp) return new Date();
@@ -526,7 +557,7 @@ export default function BookingsPage() {
         </div>
         
         <button 
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => openNewBookingModal()}
           className="btn-primary w-full sm:w-auto"
         >
           <Plus size={20} />
@@ -540,7 +571,7 @@ export default function BookingsPage() {
           type="button"
           onClick={() => applyTopFilter('today')}
           className={clsx(
-            'min-w-[168px] flex-shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
+            'min-w-[168px] shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
             activeTopPreset === 'today' ? 'border-blue-300 ring-2 ring-blue-100' : 'border-gray-200'
           )}
         >
@@ -558,7 +589,7 @@ export default function BookingsPage() {
           type="button"
           onClick={() => applyTopFilter('unpaidToday')}
           className={clsx(
-            'min-w-[168px] flex-shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
+            'min-w-[168px] shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
             activeTopPreset === 'unpaidToday' ? 'border-amber-300 ring-2 ring-amber-100' : 'border-gray-200'
           )}
         >
@@ -576,7 +607,7 @@ export default function BookingsPage() {
           type="button"
           onClick={() => applyTopFilter('confirmedToday')}
           className={clsx(
-            'min-w-[168px] flex-shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
+            'min-w-[168px] shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
             activeTopPreset === 'confirmedToday' ? 'border-green-300 ring-2 ring-green-100' : 'border-gray-200'
           )}
         >
@@ -594,7 +625,7 @@ export default function BookingsPage() {
           type="button"
           onClick={() => applyTopFilter('paidToday')}
           className={clsx(
-            'min-w-[168px] flex-shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
+            'min-w-[168px] shrink-0 bg-white border rounded-xl p-2.5 sm:min-w-0 sm:rounded-2xl sm:p-4 shadow-sm text-left transition hover:shadow-md',
             activeTopPreset === 'paidToday' ? 'border-slate-300 ring-2 ring-slate-100' : 'border-gray-200'
           )}
         >
@@ -1022,7 +1053,7 @@ export default function BookingsPage() {
                     >
                       <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1.8fr_auto] gap-3 items-start">
                         <div className="min-w-0 space-y-1">
-                          <p className="font-mono text-lg leading-tight text-slate-900 break-words">{booking.numero_reserva}</p>
+                          <p className="font-mono text-lg leading-tight text-slate-900 wrap-break-word">{booking.numero_reserva}</p>
                           <p className="text-sm text-slate-500">{formatBookingServiceDateRange(booking)}</p>
                           <p className="text-xs text-slate-400">
                             Creada: {format(getDate(booking.creado_en), 'dd MMM yyyy', { locale: es })}
@@ -1147,8 +1178,8 @@ export default function BookingsPage() {
       {/* New Booking Modal */}
       {isModalOpen && (
         <BookingForm 
-          onClose={() => setIsModalOpen(false)}
-          initialSelectedProductId={initialSelectedProductId}
+          onClose={closeNewBookingModal}
+          initialSelectedProductId={prefillProductId}
         />
       )}
 
@@ -1267,7 +1298,7 @@ function BookingDetailsModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 overflow-y-auto">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-100 flex items-center justify-center p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl shrink-0">
@@ -1399,15 +1430,44 @@ function BookingDetailsModal({
                       {products[item.producto_id]?.nombre || `Producto ${item.producto_id}`}
                     </div>
                     <div className="text-sm text-gray-500">Cantidad: {item.cantidad}</div>
+                    {(item.instructor_requested || item.fuel_requested || item.nautical_license_required) && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        {item.instructor_requested ? 'Monitor incluido' : ''}
+                        {item.instructor_requested && item.fuel_requested ? ' · ' : ''}
+                        {item.fuel_requested ? 'Fuel incluido' : ''}
+                        {(item.instructor_requested || item.fuel_requested) && item.nautical_license_required ? ' · ' : ''}
+                        {item.nautical_license_required ? 'Requiere licencia náutica' : ''}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
-              <div className="pt-2 border-t-2 border-gray-300 flex justify-between items-center">
-                <span className="font-bold text-gray-900">Total</span>
-                <span className="font-bold text-xl text-gray-900">€{booking.precio_total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
+              <div className="pt-2 border-t-2 border-gray-300 space-y-2">
+                <div className="flex justify-between items-center text-sm text-gray-600">
+                  <span>Alquiler</span>
+                  <span>€{Number(booking.precio_alquiler || booking.precio_total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
+                </div>
+                {Number(booking.instructor_total || 0) > 0 && (
+                  <div className="flex justify-between items-center text-sm text-gray-600">
+                    <span>Monitor</span>
+                    <span>€{Number(booking.instructor_total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                {Number(booking.fuel_total || 0) > 0 && (
+                  <div className="flex justify-between items-center text-sm text-gray-600">
+                    <span>Fuel</span>
+                    <span>€{Number(booking.fuel_total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-gray-900">Total</span>
+                  <span className="font-bold text-xl text-gray-900">€{booking.precio_total.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
+                </div>
               </div>
             </div>
           </section>
+
+          <NauticalLicenseManager booking={booking} />
 
           {/* Status & Actions */}
           <section>
