@@ -368,7 +368,7 @@ type SignaturePointerEvent = ReactMouseEvent<HTMLCanvasElement> | ReactTouchEven
 const LOCATION_LABELS = {
   marina_ibiza: { es: 'Marina Ibiza', en: 'Marina Ibiza' },
   marina_botafoch: { es: 'Marina Botafoch', en: 'Marina Botafoch' },
-  club_nautico: { es: 'Club Náutico', en: 'Club Náutico' },
+  club_nautico: { es: 'Club Náutico Ibiza', en: 'Club Náutico Ibiza' },
   otro: { es: 'Otro', en: 'Other' },
 } as const;
 
@@ -955,7 +955,7 @@ export default function ContractPage() {
                         {(item.instructor_requested || item.fuel_requested) && item.nautical_license_required ? ' · ' : ''}
                         {item.nautical_license_required
                           ? lang === 'es'
-                            ? 'Licencia náutica requerida'
+                            ? 'Obligatorio licencia náutica'
                             : 'Nautical licence required'
                           : ''}
                       </div>
@@ -1000,7 +1000,7 @@ export default function ContractPage() {
                       ? 'La licencia náutica del cliente ya está registrada.'
                       : 'The client nautical licence is already on file.'
                     : lang === 'es'
-                      ? 'Esta reserva requiere licencia náutica del cliente. Se puede añadir más tarde desde el panel.'
+                      ? 'Obligatorio licencia náutica. Se puede añadir más tarde desde el panel.'
                       : 'This booking requires the client nautical licence. It can be added later from the back office.'}
                 </div>
               )}

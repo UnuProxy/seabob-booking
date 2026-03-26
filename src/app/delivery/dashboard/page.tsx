@@ -12,7 +12,7 @@ import { useDeliveryBookings } from '@/lib/firebase/hooks/useDeliveryBookings';
 const LOCATION_LABELS: Record<string, string> = {
   marina_ibiza: 'Marina Ibiza',
   marina_botafoch: 'Marina Botafoch',
-  club_nautico: 'Club Náutico',
+  club_nautico: 'Club Náutico Ibiza',
   otro: 'Otro',
 };
 
@@ -68,7 +68,7 @@ export default function DeliveryDashboard() {
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Dashboard de Entregas</h1>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">Panel de inicio de entregas</h1>
           <p className="text-slate-600">
             Revisa las reservas confirmadas y pendientes para organizar las entregas.
           </p>

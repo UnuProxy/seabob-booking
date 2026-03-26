@@ -6,12 +6,13 @@ import { addDoc, collection, doc, updateDoc, serverTimestamp } from 'firebase/fi
 import { app, db, auth, storageBucketCandidates } from '@/lib/firebase/config';
 import { SEASONAL_PRICE_MONTHS } from '@/lib/productPricing';
 import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadBytes } from 'firebase/storage';
-import { ImageUp, X } from 'lucide-react';
+import { ImageUp, Trash2, X } from 'lucide-react';
 
 interface ProductFormProps {
   onClose: () => void;
   productToEdit?: Product | null;
   onSuccess: () => void;
+  onDelete?: () => void;
 }
 
 const getErrorMessage = (error: unknown): string =>
@@ -38,15 +39,19 @@ const shouldRetryWithAnotherBucket = (error: unknown): boolean => {
   );
 };
 
-export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormProps) {
+export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: ProductFormProps) {
   const [loading, setLoading] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [removeCurrentImage, setRemoveCurrentImage] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState<Partial<Product>>({
     nombre: '',
     descripcion: '',
     precio_diario: undefined,
     precios_por_mes: {},
+    efoil_battery: '',
+    precio_temporada_baja: undefined,
+    precio_temporada_alta: undefined,
     incluir_iva: false,
     comision: undefined,
     tipo: 'seabob',
@@ -57,6 +62,48 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
   const firstConfiguredMonthlyPrice = SEASONAL_PRICE_MONTHS.map(({ key }) => formData.precios_por_mes?.[key]).find(
     (value) => value !== undefined && value !== null && Number(value) > 0
   );
+  const isEfoil = formData.tipo === 'tabla';
+  const hasMonthlyOverrides = SEASONAL_PRICE_MONTHS.some(
+    ({ key }) => Number(formData.precios_por_mes?.[key] || 0) > 0
+  );
+  const [showSeasonalOverrides, setShowSeasonalOverrides] = useState(
+    Boolean(
+      productToEdit?.precio_temporada_baja ||
+        productToEdit?.precio_temporada_alta ||
+        productToEdit?.efoil_battery ||
+        hasMonthlyOverrides
+    )
+  );
+  const [showExtras, setShowExtras] = useState(
+    Boolean(
+      productToEdit?.comision ||
+        productToEdit?.instructor_price_per_day ||
+        productToEdit?.fuel_price_per_day
+    )
+  );
+  const steps = [
+    { title: 'Basico', description: 'Nombre, tipo y estado' },
+    { title: 'Precios', description: 'Tarifa y extras opcionales' },
+    { title: 'Imagen', description: 'Foto y confirmacion' },
+  ];
+  const isLastStep = currentStep === steps.length - 1;
+
+  const goToNextStep = () => {
+    if (currentStep === 0 && !String(formData.nombre || '').trim()) {
+      alert('Añade al menos el nombre del producto para continuar.');
+      return;
+    }
+    setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
+  };
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    if (!isLastStep) {
+      e.preventDefault();
+      goToNextStep();
+      return;
+    }
+    void handleSubmit(e);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,7 +117,11 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
       const previousImageUrl = productToEdit?.imagen_url?.trim() || '';
       const shouldDeleteCurrentImage = Boolean(productToEdit?.id && previousImageUrl && (removeCurrentImage || imageFile));
       const fallbackDailyPrice =
-        Number(firstConfiguredMonthlyPrice) || Number(productToEdit?.precio_diario) || 0;
+        Number(firstConfiguredMonthlyPrice) ||
+        Number(productToEdit?.precio_diario) ||
+        Number(formData.precio_temporada_alta) ||
+        Number(formData.precio_temporada_baja) ||
+        0;
 
       const productData: Record<string, unknown> = {
         ...formData,
@@ -78,6 +129,9 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
         instructor_price_per_day: Number(formData.instructor_price_per_day) || 0,
         instructor_incluir_iva: Boolean(formData.instructor_incluir_iva),
         fuel_price_per_day: Number(formData.fuel_price_per_day) || 0,
+        efoil_battery: String(formData.efoil_battery ?? '').trim(),
+        precio_temporada_baja: Number(formData.precio_temporada_baja) || 0,
+        precio_temporada_alta: Number(formData.precio_temporada_alta) || 0,
         precios_por_mes: Object.fromEntries(
           SEASONAL_PRICE_MONTHS.map(({ key }) => {
             const value = formData.precios_por_mes?.[key];
@@ -211,7 +265,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
               {productToEdit ? 'Editar Producto' : 'Nuevo Producto'}
             </h2>
             <p className="text-sm text-gray-500 mt-1">
-              Datos claros y precios en un solo vistazo.
+              Empieza con lo esencial. El resto es opcional.
             </p>
           </div>
           <button onClick={onClose} className="btn-icon text-slate-500 hover:text-slate-700 hover:bg-slate-100">
@@ -219,7 +273,47 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-slate-50">
+        <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-slate-50">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              {steps.map((step, index) => {
+                const isActive = index === currentStep;
+                const isDone = index < currentStep;
+                return (
+                  <button
+                    key={step.title}
+                    type="button"
+                    onClick={() => setCurrentStep(index)}
+                    className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-left text-xs transition ${
+                      isActive
+                        ? 'bg-slate-900 text-white'
+                        : isDone
+                          ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/80'
+                          : 'bg-slate-50 text-slate-500 ring-1 ring-slate-200/80'
+                    }`}
+                  >
+                    <span
+                      className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold ${
+                        isActive
+                          ? 'bg-white/15 text-white'
+                          : isDone
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-white text-slate-500 ring-1 ring-slate-200'
+                      }`}
+                    >
+                      {index + 1}
+                    </span>
+                    <span className="font-medium">{step.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-sm text-slate-500">
+              Paso {currentStep + 1} de {steps.length}. {steps[currentStep].description}.
+            </p>
+          </div>
+
+          {currentStep === 0 ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -280,11 +374,13 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
               </div>
             </div>
           </section>
+          ) : null}
 
+          {currentStep === 1 ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
             <div>
               <h3 className="text-lg font-bold text-slate-900">Precios</h3>
-              <p className="text-sm text-slate-500">IVA y precios por mes.</p>
+              <p className="text-sm text-slate-500">Configura IVA y tarifa base. Temporadas y meses son opcionales.</p>
             </div>
 
             <div className="mt-5 space-y-5">
@@ -306,56 +402,239 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Precios por Mes (€ / día)
-                </label>
-                <p className="text-xs text-gray-500 mb-3">
-                  Introduce solo los meses que uses.
-                </p>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                  {SEASONAL_PRICE_MONTHS.map(({ key, label }) => (
-                    <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                      <label className="block text-xs font-semibold text-gray-600 mb-2">{label}</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={formData.precios_por_mes?.[key] ?? ''}
-                        onChange={(e) =>
-                          setFormData({
-                            ...formData,
-                            precios_por_mes: {
-                              ...formData.precios_por_mes,
-                              [key]: e.target.value === '' ? undefined : Number(e.target.value),
-                            },
-                          })
-                        }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
-                        placeholder="0"
-                        inputMode="numeric"
-                      />
-                      {formData.precios_por_mes?.[key] !== undefined && Number(formData.precios_por_mes?.[key]) > 0 && (
-                        <p className="text-xs font-medium text-emerald-700 mt-2">
-                          IVA: €
-                          {Math.round(Number(formData.precios_por_mes?.[key]) * 1.21).toLocaleString('es-ES', {
-                            maximumFractionDigits: 0,
-                          })}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70">
+                <button
+                  type="button"
+                  onClick={() => setShowSeasonalOverrides((prev) => !prev)}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left sm:px-5"
+                >
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">Temporadas y precios por mes</h4>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {showSeasonalOverrides
+                        ? 'Configura batería efoil, temporada alta/baja y meses concretos.'
+                        : 'Opcional. Solo si quieres afinar la tarifa por temporada o por mes.'}
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-slate-500">
+                    {showSeasonalOverrides ? 'Ocultar' : 'Mostrar'}
+                  </span>
+                </button>
+
+                {showSeasonalOverrides ? (
+                  <div className="border-t border-slate-200 px-4 pb-4 pt-4 sm:px-5 sm:pb-5 space-y-4">
+                    {isEfoil ? (
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="md:col-span-2">
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Batería / autonomía (efoil)
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.efoil_battery ?? ''}
+                            onChange={(e) => setFormData({ ...formData, efoil_battery: e.target.value })}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
+                            placeholder="Ej. 2 kWh, ~90 min, modelo…"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Opcional. Visible en ficha y útil para efoils.</p>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Monitor / Instructor (€ / día)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={formData.instructor_price_per_day ?? ''}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                instructor_price_per_day: e.target.value === '' ? undefined : Number(e.target.value),
+                              })
+                            }
+                            className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
+                            placeholder="0"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Si el efoil puede llevar monitor, indica aquí el precio por día.
+                          </p>
+                        </div>
+
+                        <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-4">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(formData.instructor_incluir_iva)}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                instructor_incluir_iva: e.target.checked,
+                              })
+                            }
+                            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div>
+                            <span className="block text-sm font-medium text-gray-800">
+                              Incluir IVA (+21%) en monitor
+                            </span>
+                            <span className="block text-xs text-gray-500 mt-1">
+                              El monitor del efoil se guardará con IVA incluido.
+                            </span>
+                          </div>
+                        </label>
+
+                        {formData.instructor_price_per_day !== undefined &&
+                        Number(formData.instructor_price_per_day) > 0 &&
+                        formData.instructor_incluir_iva ? (
+                          <p className="text-xs font-medium text-emerald-700 md:col-span-2">
+                            Monitor con IVA: €
+                            {Math.round(Number(formData.instructor_price_per_day) * 1.21).toLocaleString('es-ES', {
+                              maximumFractionDigits: 0,
+                            })}
+                            / día
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Precio temporada baja (€ / día)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={formData.precio_temporada_baja ?? ''}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              precio_temporada_baja: e.target.value === '' ? undefined : Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
+                          placeholder="0"
+                          inputMode="numeric"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Abril–junio y septiembre–octubre, si no hay precio específico de ese mes.
                         </p>
-                      )}
+                        {formData.precio_temporada_baja !== undefined &&
+                        Number(formData.precio_temporada_baja) > 0 &&
+                        formData.incluir_iva ? (
+                          <p className="text-xs font-medium text-emerald-700 mt-2">
+                            Con IVA: €
+                            {Math.round(Number(formData.precio_temporada_baja) * 1.21).toLocaleString('es-ES', {
+                              maximumFractionDigits: 0,
+                            })}{' '}
+                            / día
+                          </p>
+                        ) : null}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Precio temporada alta – Julio y agosto (€ / día)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={formData.precio_temporada_alta ?? ''}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              precio_temporada_alta: e.target.value === '' ? undefined : Number(e.target.value),
+                            })
+                          }
+                          className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
+                          placeholder="0"
+                          inputMode="numeric"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Solo julio y agosto, si no hay precio mensual para esos meses.
+                        </p>
+                        {formData.precio_temporada_alta !== undefined &&
+                        Number(formData.precio_temporada_alta) > 0 &&
+                        formData.incluir_iva ? (
+                          <p className="text-xs font-medium text-emerald-700 mt-2">
+                            Con IVA: €
+                            {Math.round(Number(formData.precio_temporada_alta) * 1.21).toLocaleString('es-ES', {
+                              maximumFractionDigits: 0,
+                            })}{' '}
+                            / día
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
-                  ))}
-                </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Precios por Mes (€ / día)
+                      </label>
+                      <p className="text-xs text-gray-500 mb-3">
+                        Introduce solo los meses que uses. Estos valores mandan sobre la temporada alta/baja.
+                      </p>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {SEASONAL_PRICE_MONTHS.map(({ key, label }) => (
+                          <div key={key} className="rounded-2xl border border-slate-200 bg-white p-3">
+                            <label className="block text-xs font-semibold text-gray-600 mb-2">{label}</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={formData.precios_por_mes?.[key] ?? ''}
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  precios_por_mes: {
+                                    ...formData.precios_por_mes,
+                                    [key]: e.target.value === '' ? undefined : Number(e.target.value),
+                                  },
+                                })
+                              }
+                              className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
+                              placeholder="0"
+                              inputMode="numeric"
+                            />
+                            {formData.precios_por_mes?.[key] !== undefined &&
+                            Number(formData.precios_por_mes?.[key]) > 0 ? (
+                              <p className="text-xs font-medium text-emerald-700 mt-2">
+                                IVA: €
+                                {Math.round(Number(formData.precios_por_mes?.[key]) * 1.21).toLocaleString('es-ES', {
+                                  maximumFractionDigits: 0,
+                                })}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
           </section>
+          ) : null}
 
+          {currentStep === 2 ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900">Extras y comisión</h3>
-              <p className="text-sm text-slate-500">Comisión, monitor y fuel.</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowExtras((prev) => !prev)}
+              className="flex w-full items-center justify-between gap-3 text-left"
+            >
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Extras y comisión</h3>
+                <p className="text-sm text-slate-500">Opcional. Comisión, monitor y fuel.</p>
+              </div>
+              <span className="text-xs font-semibold text-slate-500">
+                {showExtras ? 'Ocultar' : 'Mostrar'}
+              </span>
+            </button>
 
+            {showExtras ? (
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -381,62 +660,64 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
                 )}
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Monitor / Instructor (€ / día)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={formData.instructor_price_per_day ?? ''}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        instructor_price_per_day: e.target.value === '' ? undefined : Number(e.target.value),
-                      })
-                    }
-                    className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
-                    placeholder="0"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Precio del monitor por día.
-                  </p>
-                </div>
-
-                <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(formData.instructor_incluir_iva)}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        instructor_incluir_iva: e.target.checked,
-                      })
-                    }
-                    className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
+              {!isEfoil ? (
+                <div className="space-y-4">
                   <div>
-                    <span className="block text-sm font-medium text-gray-800">
-                      Incluir IVA (+21%) en monitor
-                    </span>
-                    <span className="block text-xs text-gray-500 mt-1">
-                      El monitor se guardará con IVA incluido.
-                    </span>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Monitor / Instructor (€ / día)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={formData.instructor_price_per_day ?? ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          instructor_price_per_day: e.target.value === '' ? undefined : Number(e.target.value),
+                        })
+                      }
+                      className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                      placeholder="0"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Precio del monitor por día.
+                    </p>
                   </div>
-                </label>
 
-                {formData.instructor_price_per_day !== undefined && Number(formData.instructor_price_per_day) > 0 && formData.instructor_incluir_iva ? (
-                  <p className="text-xs font-medium text-emerald-700">
-                    Monitor con IVA: €
-                    {Math.round(Number(formData.instructor_price_per_day) * 1.21).toLocaleString('es-ES', {
-                      maximumFractionDigits: 0,
-                    })}
-                    / día
-                  </p>
-                ) : null}
-              </div>
+                  <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.instructor_incluir_iva)}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          instructor_incluir_iva: e.target.checked,
+                        })
+                      }
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <span className="block text-sm font-medium text-gray-800">
+                        Incluir IVA (+21%) en monitor
+                      </span>
+                      <span className="block text-xs text-gray-500 mt-1">
+                        El monitor se guardará con IVA incluido.
+                      </span>
+                    </div>
+                  </label>
+
+                  {formData.instructor_price_per_day !== undefined && Number(formData.instructor_price_per_day) > 0 && formData.instructor_incluir_iva ? (
+                    <p className="text-xs font-medium text-emerald-700">
+                      Monitor con IVA: €
+                      {Math.round(Number(formData.instructor_price_per_day) * 1.21).toLocaleString('es-ES', {
+                        maximumFractionDigits: 0,
+                      })}
+                      / día
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -461,12 +742,15 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
                 </p>
               </div>
             </div>
+            ) : null}
           </section>
+          ) : null}
 
+          {currentStep === 2 ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
             <div>
               <h3 className="text-lg font-bold text-slate-900">Imagen</h3>
-              <p className="text-sm text-slate-500">Sube o reemplaza la foto del producto.</p>
+              <p className="text-sm text-slate-500">Sube o reemplaza la foto del producto y revisa antes de guardar.</p>
             </div>
 
             <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
@@ -525,24 +809,58 @@ export function ProductForm({ onClose, productToEdit, onSuccess }: ProductFormPr
               )}
             </div>
           </section>
+          ) : null}
 
           <div className="sticky bottom-0 -mx-4 sm:mx-0 mt-2 bg-white border-t border-gray-200 px-4 sm:px-0 pt-4 pb-4 sm:pb-0">
-            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-outline w-full sm:w-auto"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-primary disabled:opacity-50 w-full sm:w-auto"
-            >
-              {loading ? 'Guardando...' : 'Guardar Producto'}
-            </button>
-          </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="order-2 sm:order-1">
+                {productToEdit?.id && onDelete ? (
+                  <button
+                    type="button"
+                    onClick={onDelete}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 sm:w-auto"
+                  >
+                    <Trash2 size={16} />
+                    Eliminar producto
+                  </button>
+                ) : null}
+              </div>
+              <div className="order-1 flex flex-col-reverse gap-3 sm:order-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="btn-outline w-full sm:w-auto"
+                >
+                  Cancelar
+                </button>
+                {currentStep > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep((prev) => Math.max(prev - 1, 0))}
+                    className="btn-outline w-full sm:w-auto"
+                  >
+                    Atras
+                  </button>
+                ) : null}
+                {isLastStep ? (
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="btn-primary disabled:opacity-50 w-full sm:w-auto"
+                  >
+                    {loading ? 'Guardando...' : 'Guardar Producto'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={goToNextStep}
+                    className="btn-primary w-full sm:w-auto"
+                  >
+                    Siguiente
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </form>
       </div>

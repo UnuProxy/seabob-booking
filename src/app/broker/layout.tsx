@@ -63,7 +63,7 @@ export default function BrokerLayout({
   if (!user || (user.rol !== 'broker' && user.rol !== 'agency')) return null;
 
   const navItems = [
-    { name: 'Dashboard', href: '/broker/dashboard', icon: Briefcase },
+    { name: 'Panel de inicio', href: '/broker/dashboard', icon: Briefcase },
     { name: 'Mis Reservas', href: '/broker/reservas', icon: CalendarDays },
     { name: 'Mis Comisiones', href: '/broker/comisiones', icon: Wallet, badge: pendingCommission > 0 ? `€${pendingCommission.toFixed(0)}` : undefined },
   ];
@@ -112,7 +112,7 @@ export default function BrokerLayout({
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
+        <nav className="flex-1 space-y-2 overflow-y-auto px-4 py-6 scrollbar-none">
           {navItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
             return (
@@ -176,7 +176,7 @@ export default function BrokerLayout({
         </div>
       </aside>
       
-      <div className="min-h-screen bg-white lg:pl-72">
+      <div className="min-h-screen bg-slate-50 lg:pl-72">
         {/* Mobile Header */}
         <header className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <div className="flex items-center gap-3">

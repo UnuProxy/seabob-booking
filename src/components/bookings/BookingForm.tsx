@@ -7,6 +7,8 @@ import { Product, BookingItem, DailyStock, User as AppUser } from '@/types';
 import { getProductDailyPrice } from '@/lib/productPricing';
 import { BOOKING_FORM_DRAFT_KEY, clearBookingDraftStorage } from '@/lib/bookingDraft';
 import {
+  getBookingItemAverageDailyPrice,
+  getBookingItemRentalTotal,
   doesBookingItemRequireNauticalLicense,
   getBookingDayCount,
   getBookingItemFuelTotal,
@@ -385,12 +387,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   };
 
   const getItemSubtotal = (item: BookingItem, product?: Product) => {
-    if (!product) return 0;
-    if (item.tipo_alquiler === 'dia') {
-      const days = getBookingDayCount(startDate, endDate);
-      return getProductDailyPrice(product, startDate) * days * item.cantidad;
-    }
-    return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
+    return getBookingItemRentalTotal(item, product, startDate, endDate);
   };
 
   const getItemInstructorSubtotal = (item: BookingItem, product?: Product) =>
@@ -535,11 +532,12 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         
         return {
           ...item,
+          duracion: item.tipo_alquiler === 'dia' ? getBookingDayCount(startDate, endDate) : item.duracion,
           producto_nombre: product?.nombre || item.producto_id,
           precio_unitario:
             item.tipo_alquiler === 'hora'
               ? product?.precio_hora || 0
-              : getProductDailyPrice(product, startDate),
+              : getBookingItemAverageDailyPrice(item, product, startDate, endDate),
           comision_percent: product?.comision || 0, // Store commission rate at time of booking
           deposito_unitario: 0,
           instructor_requested: hasInstructorOption(product) ? Boolean(item.instructor_requested) : false,
@@ -1072,7 +1070,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                     >
                       <option value="marina_ibiza">Marina Ibiza</option>
                       <option value="marina_botafoch">Marina Botafoch</option>
-                      <option value="club_nautico">Club Náutico</option>
+                      <option value="club_nautico">Club Náutico Ibiza</option>
                       <option value="otro">Otro</option>
                     </select>
                   </div>
@@ -1283,7 +1281,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
 
                           {requiresLicense ? (
                             <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
-                              Hará falta licencia náutica.
+                              Obligatorio licencia náutica.
                             </div>
                           ) : null}
                         </div>
@@ -1330,7 +1328,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                   </div>
                 )}
                 {requiresLicenseUpload ? (
-                  <div className="mt-2 text-sm font-medium text-amber-700">Hace falta licencia</div>
+                  <div className="mt-2 text-sm font-medium text-amber-700">Obligatorio licencia náutica</div>
                 ) : null}
               </div>
 

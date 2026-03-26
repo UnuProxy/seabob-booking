@@ -57,6 +57,12 @@ export interface Product {
   instructor_price_per_day?: number;
   instructor_incluir_iva?: boolean;
   fuel_price_per_day?: number;
+  /** Optional efoil battery / autonomy note (e.g. model, kWh). */
+  efoil_battery?: string;
+  /** Default daily base price (€/día) for shoulder months: Apr–Jun & Sep–Oct when no per-month price is set. */
+  precio_temporada_baja?: number;
+  /** Default daily base price (€/día) for peak Jul & Aug when no per-month price is set. */
+  precio_temporada_alta?: number;
   deposito?: number; // Refundable deposit amount
   comision: number; // Percentage (e.g., 15 = 15%)
   tipo: ProductType;
