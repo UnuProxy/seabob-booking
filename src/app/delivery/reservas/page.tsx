@@ -11,7 +11,7 @@ import { useDeliveryBookings } from '@/lib/firebase/hooks/useDeliveryBookings';
 const LOCATION_LABELS: Record<string, string> = {
   marina_ibiza: 'Marina Ibiza',
   marina_botafoch: 'Marina Botafoch',
-  club_nautico: 'Club Náutico',
+  club_nautico: 'Club Náutico Ibiza',
   otro: 'Otro',
 };
 

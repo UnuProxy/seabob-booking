@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product } from '@/types';
@@ -10,19 +10,22 @@ import { BOOKING_FORM_MODAL_OPEN_KEY, clearBookingDraftStorage } from '@/lib/boo
 import { useAuthStore } from '@/store/authStore';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { useSearchParams } from 'next/navigation';
-import { 
-  Plus, 
-  Search, 
-  Filter, 
-  CheckCircle2, 
-  Clock, 
-  XCircle, 
+import {
+  Plus,
+  Search,
+  CheckCircle2,
+  Clock,
+  XCircle,
   FileCheck,
   Eye,
   Share2,
   Euro,
   Loader2,
-  Ban
+  Ban,
+  Calendar,
+  CreditCard,
+  MoreHorizontal,
+  Link2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -60,6 +63,8 @@ export default function BrokerReservasPage() {
   const [isModalOpen, setIsModalOpen] = useState(shouldOpenNewBooking);
   const [prefillProductId, setPrefillProductId] = useState(shouldOpenNewBooking ? initialSelectedProductId : '');
   const [viewingBookingId, setViewingBookingId] = useState(initialViewingBookingId);
+  const [chargingBookingId, setChargingBookingId] = useState<string | null>(null);
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
 
   async function expireBookingIfNeeded(booking: Booking) {
     if (!booking.expiracion) return;
@@ -203,6 +208,52 @@ export default function BrokerReservasPage() {
     alert('Enlace del contrato copiado al portapapeles');
   };
 
+  const openContractTab = (booking: Booking) => {
+    if (!booking.token_acceso) {
+      alert('Esta reserva no tiene enlace de contrato.');
+      return;
+    }
+    const url = `${window.location.origin}/contract/${booking.id}?t=${booking.token_acceso}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const openOrCreatePayment = async (booking: Booking) => {
+    if (booking.pago_realizado) return;
+    if (booking.requires_payment === false) {
+      alert('Esta reserva no requiere pago online.');
+      return;
+    }
+    if (booking.stripe_payment_link) {
+      window.open(booking.stripe_payment_link, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setChargingBookingId(booking.id);
+    try {
+      const res = await fetch('/api/stripe/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: booking.id,
+          token: booking.token_acceso || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(typeof data?.error === 'string' ? data.error : 'No se pudo generar el enlace de pago');
+        return;
+      }
+      if (data?.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer');
+      } else {
+        alert('No se recibió enlace de pago');
+      }
+    } catch {
+      alert('Error al generar el enlace de pago');
+    } finally {
+      setChargingBookingId(null);
+    }
+  };
+
   const handleCancelBooking = async (booking: Booking) => {
     if (!confirm(`¿Estás seguro de que deseas cancelar la reserva ${booking.numero_reserva}?\n\nEsto cambiará el estado a "cancelada" pero mantendrá el registro.`)) {
       return;
@@ -241,31 +292,112 @@ export default function BrokerReservasPage() {
     return matchesSearch && matchesStatus && matchesDateRange;
   });
 
+  const bookingStats = useMemo(() => {
+    const list = filteredBookings;
+    return {
+      total: list.length,
+      pendientes: list.filter((b) => b.estado === 'pendiente').length,
+      confirmadas: list.filter((b) => b.estado === 'confirmada').length,
+      canceladas: list.filter((b) => b.estado === 'cancelada').length,
+    };
+  }, [filteredBookings]);
+
+  useEffect(() => {
+    if (!openActionMenuId) return;
+    const close = () => setOpenActionMenuId(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [openActionMenuId]);
+
   const viewingBooking = viewingBookingId
     ? bookings.find((booking) => booking.id === viewingBookingId) || null
     : null;
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'confirmada': return 'bg-green-100 text-green-700 border-green-200';
-      case 'pendiente': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'completada': return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'cancelada': return 'bg-red-100 text-red-700 border-red-200';
-      case 'expirada': return 'bg-orange-100 text-orange-700 border-orange-200';
-      default: return 'bg-gray-100 text-gray-700 border-gray-200';
+      case 'confirmada':
+        return 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/80';
+      case 'pendiente':
+        return 'bg-amber-50 text-amber-900 ring-1 ring-amber-200/80';
+      case 'completada':
+        return 'bg-sky-50 text-sky-800 ring-1 ring-sky-200/80';
+      case 'cancelada':
+        return 'bg-rose-50 text-rose-800 ring-1 ring-rose-200/80';
+      case 'expirada':
+        return 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/80';
+      default:
+        return 'bg-slate-100 text-slate-700 ring-1 ring-slate-200/80';
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'confirmada': return <CheckCircle2 size={16} />;
-      case 'pendiente': return <Clock size={16} />;
-      case 'completada': return <FileCheck size={16} />;
-      case 'cancelada': return <XCircle size={16} />;
-      case 'expirada': return <Clock size={16} />;
-      default: return <Clock size={16} />;
+      case 'confirmada': return <CheckCircle2 size={14} className="shrink-0" />;
+      case 'pendiente': return <Clock size={14} className="shrink-0" />;
+      case 'completada': return <FileCheck size={14} className="shrink-0" />;
+      case 'cancelada': return <XCircle size={14} className="shrink-0" />;
+      case 'expirada': return <Clock size={14} className="shrink-0" />;
+      default: return <Clock size={14} className="shrink-0" />;
     }
   };
+
+  const getStatusLabel = (status: string) => {
+    const map: Record<string, string> = {
+      pendiente: 'Pendiente',
+      confirmada: 'Confirmada',
+      cancelada: 'Cancelada',
+      completada: 'Completada',
+      expirada: 'Expirada',
+    };
+    return map[status] || status;
+  };
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setStartDateFilter('');
+    setEndDateFilter('');
+    setStatusFilter('all');
+  };
+
+  const formatMoney = (n: number) =>
+    n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 });
+
+  const ubicacionLabel = (booking: Booking) => {
+    switch (booking.ubicacion_entrega) {
+      case 'marina_ibiza':
+        return 'Marina Ibiza';
+      case 'marina_botafoch':
+        return 'Marina Botafoch';
+      case 'club_nautico':
+        return 'Club Náutico Ibiza';
+      case 'otro':
+        return booking.ubicacion_entrega_detalle?.trim() || 'Otro';
+      default:
+        return typeof booking.ubicacion_entrega === 'string' && booking.ubicacion_entrega
+          ? booking.ubicacion_entrega
+          : '';
+    }
+  };
+
+  const bookingGroups = useMemo(() => {
+    const map = new Map<string, Booking[]>();
+    for (const b of filteredBookings) {
+      const d0 = getDate(b.fecha_inicio);
+      const key = format(d0, 'yyyy-MM-dd');
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(b);
+    }
+    const sortedKeys = [...map.keys()].sort();
+    return sortedKeys.map((key) => {
+      const list = [...(map.get(key) || [])];
+      list.sort((a, b) => {
+        const ta = (a.hora_entrega || '').localeCompare(b.hora_entrega || '');
+        if (ta !== 0) return ta;
+        return getDate(b.creado_en).getTime() - getDate(a.creado_en).getTime();
+      });
+      return { key, day: getDate(list[0].fecha_inicio), bookings: list };
+    });
+  }, [filteredBookings]);
 
   if (loading) {
     return (
@@ -277,74 +409,60 @@ export default function BrokerReservasPage() {
   }
 
   return (
-    <div>
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+    <div className="space-y-8">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Mis Reservas</h1>
-          <p className="text-slate-600">Gestiona las reservas que has creado.</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Mis reservas</h1>
+          <p className="mt-1 max-w-lg text-sm text-slate-500">Gestiona y consulta las reservas creadas.</p>
         </div>
         <button
+          type="button"
           onClick={() => openNewBookingModal()}
-          className="btn-primary"
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
         >
-          <Plus size={20} />
-          Nueva Reserva
+          <Plus size={17} strokeWidth={2.25} />
+          Nueva reserva
         </button>
       </div>
 
-      {/* Search and Filter */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
-        <div className="flex flex-col lg:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
+      <div className="rounded-xl bg-white p-4 ring-1 ring-slate-200/70 sm:p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
-              type="text"
-              placeholder="Buscar por cliente, email o número de reserva..."
+              type="search"
+              placeholder="Buscar reserva o cliente..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full rounded-lg bg-slate-50 py-2.5 pl-10 pr-3 text-sm text-slate-900 outline-none ring-1 ring-slate-200/80 transition placeholder:text-slate-400 focus:bg-white focus:ring-slate-300"
             />
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-slate-500 uppercase">Desde</label>
+          <div className="flex flex-wrap items-center gap-2 lg:flex-nowrap">
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 ring-1 ring-slate-200/80 sm:flex-initial sm:min-w-[260px]">
+              <Calendar className="h-4 w-4 shrink-0 text-slate-400" />
               <input
                 type="date"
                 value={startDateFilter}
                 onChange={(e) => setStartDateFilter(e.target.value)}
-                className="px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+                className="min-w-0 flex-1 border-0 bg-transparent p-0 text-xs text-slate-700 outline-none sm:text-sm"
+                aria-label="Fecha desde"
               />
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-slate-500 uppercase">Hasta</label>
+              <span className="shrink-0 text-slate-300">–</span>
               <input
                 type="date"
                 value={endDateFilter}
                 onChange={(e) => setEndDateFilter(e.target.value)}
-                className="px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+                className="min-w-0 flex-1 border-0 bg-transparent p-0 text-xs text-slate-700 outline-none sm:text-sm"
+                aria-label="Fecha hasta"
               />
             </div>
-            {(startDateFilter || endDateFilter) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setStartDateFilter('');
-                  setEndDateFilter('');
-                }}
-                className="btn-ghost text-sm"
-              >
-                Limpiar fechas
-              </button>
-            )}
-          </div>
 
-          <div className="flex items-center gap-2">
-            <Filter className="text-slate-400" size={20} />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="rounded-lg bg-white px-3 py-2.5 text-sm font-medium text-slate-800 outline-none ring-1 ring-slate-200/80 focus:ring-slate-300"
+              aria-label="Estado"
             >
               <option value="all">Todos los estados</option>
               <option value="pendiente">Pendiente</option>
@@ -353,126 +471,243 @@ export default function BrokerReservasPage() {
               <option value="cancelada">Cancelada</option>
               <option value="expirada">Expirada</option>
             </select>
+
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="px-2 text-sm text-slate-500 underline-offset-4 hover:text-slate-800 hover:underline"
+            >
+              Limpiar
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Bookings Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-slate-50 border-b border-slate-200">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Reserva</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Cliente</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Fechas</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Productos</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Total</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Estado</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Firmado</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Pagado</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200">
-              {filteredBookings.map((booking) => (
-                <tr key={booking.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-slate-900">{booking.numero_reserva}</div>
-                    <div className="text-xs text-slate-500">
-                      {format(getDate(booking.creado_en), 'dd MMM yyyy', { locale: es })}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-slate-900">{booking.cliente.nombre}</div>
-                    <div className="text-xs text-slate-500">{booking.cliente.email}</div>
-                    <div className="text-xs text-slate-500">{booking.cliente.telefono}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-slate-900">
-                      {format(getDate(booking.fecha_inicio), 'dd MMM', { locale: es })} - {format(getDate(booking.fecha_fin), 'dd MMM', { locale: es })}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-slate-900">
-                      {booking.items.map((item, idx) => {
-                        const product = products[item.producto_id];
-                        return (
-                          <div key={idx} className="text-xs">
-                            {product?.nombre || 'Producto desconocido'} x{item.cantidad}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-1 text-sm font-semibold text-slate-900">
-                      <Euro size={14} />
-                      {booking.precio_total.toFixed(2)}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={clsx(
-                      "px-3 py-1 rounded-full text-xs font-medium border flex items-center gap-1 w-fit",
-                      getStatusColor(booking.estado)
-                    )}>
-                      {getStatusIcon(booking.estado)}
-                      {booking.estado}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {booking.terminos_aceptados ? (
-                      <span className="text-green-600 text-sm">✓ Firmado</span>
-                    ) : (
-                      <span className="text-slate-400 text-sm">Pendiente</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {booking.pago_realizado ? (
-                      <span className="text-green-600 text-sm">✓ Pagado</span>
-                    ) : (
-                      <span className="text-slate-400 text-sm">Pendiente</span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => copyContractLink(booking)}
-                        className="btn-icon text-slate-600 hover:bg-emerald-50 hover:text-emerald-600"
-                        title="Compartir enlace"
-                      >
-                        <Share2 size={18} />
-                      </button>
-                      <button
-                        onClick={() => setViewingBookingId(booking.id)}
-                        className="btn-icon text-slate-600 hover:bg-blue-50 hover:text-blue-600"
-                        title="Ver detalles"
-                      >
-                        <Eye size={18} />
-                      </button>
-                      {booking.estado !== 'cancelada' && booking.estado !== 'expirada' && (
-                        <button
-                          onClick={() => handleCancelBooking(booking)}
-                          className="btn-icon text-slate-600 hover:bg-orange-50 hover:text-orange-600"
-                          title="Cancelar reserva"
-                        >
-                          <Ban size={18} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filteredBookings.length === 0 && (
-            <div className="px-6 py-12 text-center text-slate-500">
-              {bookings.length === 0 
-                ? 'No hay reservas aún. Crea tu primera reserva para comenzar.'
-                : 'No se encontraron reservas con los filtros aplicados.'}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-3">
+        {[
+          { label: 'Total', value: bookingStats.total, dot: 'bg-slate-400' },
+          { label: 'Pendientes', value: bookingStats.pendientes, dot: 'bg-amber-500' },
+          { label: 'Confirmadas', value: bookingStats.confirmadas, dot: 'bg-emerald-500' },
+          { label: 'Canceladas', value: bookingStats.canceladas, dot: 'bg-rose-500' },
+        ].map((card) => (
+          <div
+            key={card.label}
+            className="rounded-xl bg-white px-4 py-3.5 ring-1 ring-slate-200/70"
+          >
+            <div className="flex items-center gap-2">
+              <span className={`h-1.5 w-1.5 rounded-full ${card.dot}`} aria-hidden />
+              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{card.label}</p>
             </div>
-          )}
-        </div>
+            <p className="mt-1 text-xl font-semibold tabular-nums tracking-tight text-slate-900">{card.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="overflow-hidden rounded-xl bg-white ring-1 ring-slate-200/70">
+        {filteredBookings.length === 0 ? (
+          <div className="px-6 py-14 text-center text-sm text-slate-500">
+            {bookings.length === 0
+              ? 'No hay reservas aún. Crea tu primera reserva para comenzar.'
+              : 'No se encontraron reservas con los filtros aplicados.'}
+          </div>
+        ) : (
+          <div>
+            {bookingGroups.map((group) => (
+              <div key={group.key}>
+                <div className="border-b border-slate-100/80 bg-slate-50/50 px-4 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">
+                    {format(group.day, 'EEEE, d MMM yyyy', { locale: es }).toUpperCase()}
+                  </p>
+                </div>
+                <ul className="divide-y divide-slate-100/80">
+                  {group.bookings.map((booking) => {
+                    const paid = Boolean(booking.pago_realizado);
+                    const showPendingPay =
+                      !paid && booking.requires_payment !== false && booking.estado !== 'expirada';
+                    const place = ubicacionLabel(booking);
+                    const timePart = booking.hora_entrega?.trim();
+                    const placeTime =
+                      place && timePart ? `${place} · ${timePart}` : place || timePart || '';
+                    const item = booking.items[0];
+                    const product = item ? products[item.producto_id] : undefined;
+                    const productMeta = item
+                      ? `${product?.nombre || 'Producto'} · ${item.cantidad} uds`
+                      : '—';
+                    const canCharge =
+                      !paid &&
+                      booking.requires_payment !== false &&
+                      booking.estado !== 'cancelada' &&
+                      booking.estado !== 'expirada';
+                    const isCharging = chargingBookingId === booking.id;
+                    const canCancel = booking.estado !== 'cancelada' && booking.estado !== 'expirada';
+                    const menuOpen = openActionMenuId === booking.id;
+
+                    return (
+                      <li key={booking.id}>
+                        <div className="flex flex-col gap-3 px-4 py-3.5 transition-colors hover:bg-slate-50/40 lg:flex-row lg:items-center lg:gap-6 lg:py-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[15px] font-semibold tracking-tight text-slate-900">
+                              {booking.cliente.nombre}
+                            </p>
+                            {booking.cliente.email ? (
+                              <p className="mt-0.5 text-xs text-slate-500">{booking.cliente.email}</p>
+                            ) : null}
+                            <p className="mt-1 text-xs text-slate-400">
+                              <span className="text-slate-500">{booking.numero_reserva}</span>
+                              <span className="mx-1.5 text-slate-300" aria-hidden>
+                                ·
+                              </span>
+                              Creada{' '}
+                              {format(getDate(booking.creado_en), 'd MMM yyyy', { locale: es })}
+                            </p>
+                            {placeTime ? (
+                              <p className="mt-1.5 text-xs text-slate-500">{placeTime}</p>
+                            ) : null}
+                            <p
+                              className={clsx(
+                                'text-xs text-slate-400',
+                                placeTime ? 'mt-0.5' : 'mt-1.5'
+                              )}
+                            >
+                              {productMeta}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-3 border-t border-slate-100/80 pt-3 lg:w-auto lg:shrink-0 lg:justify-end lg:border-t-0 lg:pt-0">
+                            <div className="flex min-w-0 flex-1 flex-col gap-1.5 lg:flex-initial lg:items-end">
+                              <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
+                                <span
+                                  className={clsx(
+                                    'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium',
+                                    getStatusColor(booking.estado)
+                                  )}
+                                >
+                                  {getStatusIcon(booking.estado)}
+                                  {getStatusLabel(booking.estado)}
+                                </span>
+                                {showPendingPay ? (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900 ring-1 ring-amber-200/70">
+                                    <Clock size={11} className="shrink-0" />
+                                    Pend. pago
+                                  </span>
+                                ) : null}
+                                {paid ? (
+                                  <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800 ring-1 ring-emerald-200/70">
+                                    <CheckCircle2 size={11} className="shrink-0" />
+                                    Pagado
+                                  </span>
+                                ) : null}
+                              </div>
+                              <p className="text-base font-semibold tabular-nums tracking-tight text-slate-900 lg:text-right">
+                                {formatMoney(Number(booking.precio_total) || 0)}
+                              </p>
+                            </div>
+
+                            <div className="relative shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenActionMenuId((id) => (id === booking.id ? null : booking.id));
+                                }}
+                                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                                aria-label="Acciones"
+                                aria-expanded={menuOpen}
+                              >
+                                <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
+                              </button>
+                              {menuOpen ? (
+                                <div
+                                  className="absolute right-0 top-full z-30 mt-1 w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80"
+                                  onClick={(e) => e.stopPropagation()}
+                                  role="menu"
+                                >
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                                    onClick={() => {
+                                      setOpenActionMenuId(null);
+                                      setViewingBookingId(booking.id);
+                                    }}
+                                  >
+                                    <Eye className="h-4 w-4 opacity-70" />
+                                    Ver detalles
+                                  </button>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    disabled={!canCharge || isCharging}
+                                    className={clsx(
+                                      'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+                                      canCharge && !isCharging
+                                        ? 'text-slate-700 hover:bg-slate-50'
+                                        : 'cursor-not-allowed text-slate-400'
+                                    )}
+                                    onClick={() => {
+                                      if (!canCharge || isCharging) return;
+                                      setOpenActionMenuId(null);
+                                      void openOrCreatePayment(booking);
+                                    }}
+                                  >
+                                    {isCharging ? (
+                                      <Loader2 className="h-4 w-4 animate-spin opacity-70" />
+                                    ) : (
+                                      <CreditCard className="h-4 w-4 opacity-70" />
+                                    )}
+                                    Cobrar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                                    onClick={() => {
+                                      setOpenActionMenuId(null);
+                                      openContractTab(booking);
+                                    }}
+                                  >
+                                    <Link2 className="h-4 w-4 opacity-70" />
+                                    Abrir contrato
+                                  </button>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                                    onClick={() => {
+                                      setOpenActionMenuId(null);
+                                      copyContractLink(booking);
+                                    }}
+                                  >
+                                    <Share2 className="h-4 w-4 opacity-70" />
+                                    Copiar enlace
+                                  </button>
+                                  {canCancel ? (
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50"
+                                      onClick={() => {
+                                        setOpenActionMenuId(null);
+                                        void handleCancelBooking(booking);
+                                      }}
+                                    >
+                                      <Ban className="h-4 w-4 opacity-80" />
+                                      Cancelar reserva
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Booking Form Modal */}
@@ -504,11 +739,14 @@ export default function BrokerReservasPage() {
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-slate-500 uppercase">Estado</label>
-                  <span className={clsx(
-                    "inline-block px-3 py-1 rounded-full text-sm font-medium border",
-                    getStatusColor(viewingBooking.estado)
-                  )}>
-                    {viewingBooking.estado}
+                  <span
+                    className={clsx(
+                      'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium',
+                      getStatusColor(viewingBooking.estado)
+                    )}
+                  >
+                    {getStatusIcon(viewingBooking.estado)}
+                    {getStatusLabel(viewingBooking.estado)}
                   </span>
                 </div>
               </div>
@@ -537,7 +775,7 @@ export default function BrokerReservasPage() {
                               {item.instructor_requested && item.fuel_requested ? ' · ' : ''}
                               {item.fuel_requested ? 'Fuel incluido' : ''}
                               {(item.instructor_requested || item.fuel_requested) && item.nautical_license_required ? ' · ' : ''}
-                              {item.nautical_license_required ? 'Requiere licencia náutica' : ''}
+                              {item.nautical_license_required ? 'Obligatorio licencia náutica' : ''}
                             </div>
                           )}
                         </div>
@@ -554,7 +792,7 @@ export default function BrokerReservasPage() {
                   <p className="text-sm"><span className="font-semibold text-slate-700">Ubicación:</span> {
                     viewingBooking.ubicacion_entrega === 'marina_ibiza' ? 'Marina Ibiza' :
                     viewingBooking.ubicacion_entrega === 'marina_botafoch' ? 'Marina Botafoch' :
-                    viewingBooking.ubicacion_entrega === 'club_nautico' ? 'Club Náutico' :
+                    viewingBooking.ubicacion_entrega === 'club_nautico' ? 'Club Náutico Ibiza' :
                     viewingBooking.ubicacion_entrega === 'otro' ? (viewingBooking.ubicacion_entrega_detalle || 'Otro') :
                     viewingBooking.ubicacion_entrega || 'No especificado'
                   }</p>
@@ -601,6 +839,27 @@ export default function BrokerReservasPage() {
                   <p className="text-sm text-slate-700 bg-slate-50 rounded-lg p-4">{viewingBooking.notas}</p>
                 </div>
               )}
+
+              <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+                <button
+                  type="button"
+                  onClick={() => copyContractLink(viewingBooking)}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Share2 className="h-4 w-4" />
+                  Copiar enlace contrato
+                </button>
+                {viewingBooking.estado !== 'cancelada' && viewingBooking.estado !== 'expirada' ? (
+                  <button
+                    type="button"
+                    onClick={() => handleCancelBooking(viewingBooking)}
+                    className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-800 hover:bg-rose-100"
+                  >
+                    <Ban className="h-4 w-4" />
+                    Cancelar reserva
+                  </button>
+                ) : null}
+              </div>
 
               <NauticalLicenseManager booking={viewingBooking} />
             </div>

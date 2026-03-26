@@ -17,6 +17,8 @@ import {
 import { db } from '@/lib/firebase/config';
 import { getProductDailyPrice, getProductVatShortLabel } from '@/lib/productPricing';
 import {
+  getBookingItemAverageDailyPrice,
+  getBookingItemRentalTotal,
   doesBookingItemRequireNauticalLicense,
   getBookingDayCount,
   getBookingItemFuelTotal,
@@ -221,10 +223,9 @@ export default function PublicBookingPage() {
   const rentalTotal = useMemo(() => {
     return items.reduce((acc, item) => {
       const product = products.find((p) => p.id === item.producto_id);
-      if (!product) return acc;
-      return acc + getProductDailyPrice(product, startDate) * dayCount * item.cantidad;
+      return acc + getBookingItemRentalTotal(item, product, startDate, endDate);
     }, 0);
-  }, [items, products, dayCount, startDate]);
+  }, [endDate, items, products, startDate]);
 
   const instructorTotal = useMemo(
     () =>
@@ -389,7 +390,7 @@ export default function PublicBookingPage() {
           precio_unitario:
             item.tipo_alquiler === 'hora'
               ? product?.precio_hora || 0
-              : getProductDailyPrice(product, startDate),
+              : getBookingItemAverageDailyPrice(item, product, startDate, endDate),
           comision_percent: product?.comision || 0,
           deposito_unitario: 0,
           instructor_requested: hasInstructorOption(product) ? Boolean(item.instructor_requested) : false,
@@ -413,12 +414,7 @@ export default function PublicBookingPage() {
       }
 
       const getItemSubtotal = (item: BookingItem, product?: Product) => {
-        if (!product) return 0;
-        if (item.tipo_alquiler === 'dia') {
-          const days = getBookingDayCount(startDate, endDate);
-          return getProductDailyPrice(product, startDate) * days * item.cantidad;
-        }
-        return (product.precio_hora || 0) * Math.max(1, item.duracion) * item.cantidad;
+        return getBookingItemRentalTotal(item, product, startDate, endDate);
       };
 
       const commissionPartnerRole =
@@ -963,7 +959,7 @@ export default function PublicBookingPage() {
 
                         {requiresLicense && (
                           <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
-                            Sin monitor en este producto: la licencia náutica del cliente será obligatoria. Puede añadirse más tarde.
+                            Obligatorio licencia náutica. Puede añadirse más tarde.
                           </div>
                         )}
                       </div>
@@ -998,7 +994,7 @@ export default function PublicBookingPage() {
                   >
                     <option value="marina_ibiza">Marina Ibiza</option>
                     <option value="marina_botafoch">Marina Botafoch</option>
-                    <option value="club_nautico">Club Náutico</option>
+                    <option value="club_nautico">Club Náutico Ibiza</option>
                     <option value="otro">Otro</option>
                   </select>
                 </label>

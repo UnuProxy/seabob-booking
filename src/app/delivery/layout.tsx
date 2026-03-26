@@ -58,7 +58,7 @@ export default function DeliveryLayout({
   if (!user || user.rol !== 'delivery') return null;
 
   const navItems = [
-    { name: 'Dashboard', href: '/delivery/dashboard', icon: MapPin },
+    { name: 'Panel de inicio', href: '/delivery/dashboard', icon: MapPin },
     { name: 'Entregas', href: '/delivery/reservas', icon: CalendarDays },
   ];
 
@@ -106,7 +106,7 @@ export default function DeliveryLayout({
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
+        <nav className="flex-1 space-y-2 overflow-y-auto px-4 py-6 scrollbar-none">
           {navItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
             return (

@@ -88,7 +88,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               if (window.innerWidth < 1024) onClose();
             }}
             className="relative w-full h-16 bg-white/90 rounded-2xl p-2 shadow-lg shadow-black/30 border border-white/50 block"
-            aria-label="Ir al dashboard"
+            aria-label="Ir al panel de inicio"
           >
             <Image
               src="/seabob-logo-CENTER_IBIZA-ROJO.png"
@@ -108,7 +108,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 px-4 py-6 overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
+        <nav className="flex-1 overflow-y-auto px-4 py-6 scrollbar-none">
           <div className="space-y-2">
             {primaryNavItems.map((item) => {
               const hrefPath = item.href.split('#')[0];

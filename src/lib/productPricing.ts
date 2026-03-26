@@ -36,7 +36,22 @@ export function getProductBaseDailyPrice(product: Product | undefined, dateLike?
   }
 
   const seasonalPrice = product.precios_por_mes?.[seasonalMonth];
-  return seasonalPrice !== undefined ? Number(seasonalPrice) || 0 : Number(product.precio_diario) || 0;
+  if (seasonalPrice !== undefined && Number(seasonalPrice) > 0) {
+    return Number(seasonalPrice) || 0;
+  }
+
+  if (seasonalMonth === 'july' || seasonalMonth === 'august') {
+    const alta = Number(product.precio_temporada_alta);
+    if (alta > 0) return alta;
+  }
+
+  const lowSeasonMonths: SeasonalPriceMonth[] = ['april', 'may', 'june', 'september', 'october'];
+  if (lowSeasonMonths.includes(seasonalMonth)) {
+    const baja = Number(product.precio_temporada_baja);
+    if (baja > 0) return baja;
+  }
+
+  return Number(product.precio_diario) || 0;
 }
 
 export function getProductDailyPrice(product: Product | undefined, dateLike?: Date | string): number {
