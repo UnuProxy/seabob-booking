@@ -16,7 +16,8 @@ import {
   Coins,
   LineChart,
   Activity,
-  Link2
+  Link2,
+  Euro
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase/config';
@@ -45,6 +46,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     { name: 'Stock Diario', href: '/admin/stock', icon: CalendarDays, roles: ['admin', 'colaborador'], group: 'primary' },
     { name: 'Comisiones', href: '/admin/comisiones', icon: Coins, roles: ['admin'], group: 'secondary' },
     { name: 'Finanzas', href: '/admin/finanzas', icon: LineChart, roles: ['admin'], group: 'secondary' },
+    { name: 'Facturas', href: '/admin/facturas', icon: Euro, roles: ['admin'], group: 'secondary' },
     { name: 'Activity', href: '/admin/activity', icon: Activity, roles: ['admin'], group: 'secondary' },
     { name: 'Contratos', href: '/admin/contratos', icon: FileText, roles: ['admin', 'colaborador'], group: 'secondary' },
     { name: 'Brokers/Agencias', href: '/admin/partners', icon: Briefcase, roles: ['admin'], group: 'secondary' },
@@ -121,7 +123,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                     if (window.innerWidth < 1024) onClose();
                   }}
                   className={clsx(
-                    "flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-base",
+                    "flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-sm",
                     isActive 
                       ? "bg-white/18 text-white shadow-[0_12px_30px_rgba(15,23,42,0.35)] translate-x-1" 
                       : "text-blue-100/70 hover:bg-white/10 hover:text-white hover:translate-x-1"
@@ -153,7 +155,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       if (window.innerWidth < 1024) onClose();
                     }}
                     className={clsx(
-                      "flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-base",
+                      "flex items-center gap-4 px-4 py-4 rounded-xl transition-all duration-200 group font-medium text-sm",
                       isActive 
                         ? "bg-white/18 text-white shadow-[0_12px_30px_rgba(15,23,42,0.35)] translate-x-1" 
                         : "text-blue-100/70 hover:bg-white/10 hover:text-white hover:translate-x-1"

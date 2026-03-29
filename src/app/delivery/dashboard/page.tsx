@@ -8,13 +8,7 @@ import Link from 'next/link';
 import clsx from 'clsx';
 import type { Booking } from '@/types';
 import { useDeliveryBookings } from '@/lib/firebase/hooks/useDeliveryBookings';
-
-const LOCATION_LABELS: Record<string, string> = {
-  marina_ibiza: 'Marina Ibiza',
-  marina_botafoch: 'Marina Botafoch',
-  club_nautico: 'Club Náutico Ibiza',
-  otro: 'Otro',
-};
+import { getDeliveryLocationLabel } from '@/lib/deliveryLocations';
 
 const getDateValue = (value: string) => {
   const parsed = parseISO(value);
@@ -126,9 +120,8 @@ export default function DeliveryDashboard() {
           <div className="grid gap-4 lg:grid-cols-2">
             {nextDeliveries.map((booking) => {
               const date = getDateValue(booking.fecha_inicio);
-              const location = booking.ubicacion_entrega
-                ? LOCATION_LABELS[booking.ubicacion_entrega] || booking.ubicacion_entrega
-                : 'Sin ubicación';
+              const location =
+                getDeliveryLocationLabel(booking.ubicacion_entrega, booking.ubicacion_entrega_detalle) || 'Sin ubicación';
               return (
                 <div
                   key={booking.id}

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebase/admin';
-import type { Booking } from '@/types';
+import { getBookingClientTotals } from '@/lib/bookingClientPricing';
+import type { Booking, Product } from '@/types';
 
 // Initialize Stripe only if keys are present
 const stripe = process.env.STRIPE_SECRET_KEY 
@@ -54,12 +55,38 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Booking expired' }, { status: 409 });
     }
 
-    const totalDue = Number(booking.precio_total || 0);
+    const productIds = Array.from(
+      new Set((booking.items || []).map((item) => item.producto_id).filter(Boolean))
+    );
+    const productsById: Record<string, Product> = {};
+
+    await Promise.all(
+      productIds.map(async (productId) => {
+        const productSnap = await adminDb.collection('products').doc(productId).get();
+        if (productSnap.exists) {
+          productsById[productId] = {
+            id: productSnap.id,
+            ...productSnap.data(),
+          } as Product;
+        }
+      })
+    );
+
+    const clientTotals = getBookingClientTotals(
+      booking.items || [],
+      (productId) => productsById[productId],
+      booking.fecha_inicio,
+      booking.fecha_fin
+    );
+
+    const computedTotal = Number(clientTotals.total || 0);
+    const deliveryTotal = Number(booking.delivery_total || 0);
+    const totalDue = computedTotal > 0 ? computedTotal + deliveryTotal : Number(booking.precio_total || 0);
     if (!Number.isFinite(totalDue) || totalDue <= 0) {
       return NextResponse.json({ error: 'Invalid booking amount' }, { status: 400 });
     }
 
-    const rentalAmount = Math.round((booking.precio_total || 0) * 100);
+    const rentalAmount = Math.round(totalDue * 100);
 
     const resolvedEmail = booking.cliente?.email;
     const resolvedName = booking.cliente?.nombre;

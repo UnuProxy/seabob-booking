@@ -18,6 +18,18 @@ export type PaymentMethod =
   | 'tarjeta'         // Card payment (manual)
   | 'otro';           // Other
 
+export type DeliveryLocation =
+  | 'marina_ibiza'
+  | 'marina_botafoch'
+  | 'club_nautico'
+  | 'marina_port_ibiza'
+  | 'marina_santa_eulalia'
+  | 'club_nautic_san_antonio'
+  | 'otro';
+
+export type InvoiceLineType = 'rental' | 'instructor' | 'fuel' | 'delivery';
+export type InvoiceKind = 'standard' | 'refund';
+
 export interface User {
   id: string;
   email: string;
@@ -120,7 +132,7 @@ export interface Booking {
   items: BookingItem[];
   fecha_inicio: string;
   fecha_fin: string;
-  ubicacion_entrega?: 'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro';
+  ubicacion_entrega?: DeliveryLocation;
   ubicacion_entrega_detalle?: string;
   nombre_barco?: string;
   numero_amarre?: string;
@@ -133,6 +145,7 @@ export interface Booking {
   precio_alquiler?: number;
   instructor_total?: number;
   fuel_total?: number;
+  delivery_total?: number;
   nautical_license_required?: boolean;
   nautical_license_url?: string;
   nautical_license_path?: string;
@@ -146,6 +159,9 @@ export interface Booking {
   pago_realizado_en?: Date | string;
   pago_metodo?: PaymentMethod; // How payment was received
   pago_referencia?: string; // Payment reference number
+  invoice_id?: string;
+  invoice_number?: string;
+  invoice_generated_at?: Date | string;
   stripe_checkout_session_id?: string;
   stripe_payment_link?: string;
   stripe_payment_intent_id?: string;
@@ -262,4 +278,41 @@ export interface BookingLink {
   creado_en: Date | string;
   ultimo_acceso?: Date | string;
   usado_en?: Date | string;
+}
+
+export interface InvoiceLine {
+  type: InvoiceLineType;
+  description: string;
+  gross_amount: number;
+  vat_rate: number;
+  vat_amount: number;
+  net_amount: number;
+}
+
+export interface Invoice {
+  id: string;
+  booking_id: string;
+  booking_ref: string;
+  invoice_number: string;
+  invoice_kind: InvoiceKind;
+  sequence_number: number;
+  invoice_date: string;
+  company_name: string;
+  company_address: string;
+  company_tax_id: string;
+  client_name: string;
+  client_email?: string;
+  client_phone?: string;
+  amount_net: number;
+  amount_vat: number;
+  amount_gross: number;
+  payment_method?: PaymentMethod;
+  payment_reference?: string;
+  paid_at?: Date | string;
+  refund_reason?: string;
+  related_invoice_id?: string;
+  related_invoice_number?: string;
+  lines: InvoiceLine[];
+  created_at: Date | string;
+  created_by?: string;
 }

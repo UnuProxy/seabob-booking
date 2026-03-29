@@ -10,6 +10,7 @@ import { PaymentRefundManager } from '@/components/bookings/PaymentRefundManager
 import { BOOKING_FORM_MODAL_OPEN_KEY, clearBookingDraftStorage } from '@/lib/bookingDraft';
 import { useAuthStore } from '@/store/authStore';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
+import { getBookingDeliveryFee, getDeliveryLocationLabel } from '@/lib/deliveryLocations';
 import { 
   CalendarDays, 
   Plus, 
@@ -59,7 +60,7 @@ function AdminBookingActionsMenu({
   onOpenContract: () => void;
   onCancel: () => void;
 }) {
-  const canCancel = booking.estado !== 'cancelada' && booking.estado !== 'expirada';
+  const canCancel = booking.estado !== 'cancelada';
   return (
     <div className="relative shrink-0">
       <button
@@ -438,13 +439,7 @@ export default function BookingsPage() {
 
   const getLocationLabel = (booking: Booking) => {
     if (!booking.ubicacion_entrega) return 'No especificado';
-    if (booking.ubicacion_entrega === 'otro') {
-      return booking.ubicacion_entrega_detalle || 'Otro';
-    }
-    if (booking.ubicacion_entrega === 'marina_ibiza') return 'Marina Ibiza';
-    if (booking.ubicacion_entrega === 'marina_botafoch') return 'Marina Botafoch';
-    if (booking.ubicacion_entrega === 'club_nautico') return 'Club Náutico Ibiza';
-    return booking.ubicacion_entrega;
+    return getDeliveryLocationLabel(booking.ubicacion_entrega, booking.ubicacion_entrega_detalle) || 'No especificado';
   };
 
   const getDeliverySummary = (booking: Booking) => {
@@ -611,6 +606,41 @@ export default function BookingsPage() {
     setTimeFilter('today');
     setDateFrom('');
     setDateTo('');
+  };
+
+  const isExpiredBooking = (booking: Booking) =>
+    booking.estado === 'expirada' || Boolean(booking.expirado);
+
+  const getPaymentBadgeData = (booking: Booking) => {
+    if (booking.reembolso_realizado) {
+      return {
+        label: 'Reembolsado',
+        className: 'bg-rose-50 text-rose-800 ring-1 ring-rose-200/80',
+        icon: <XCircle size={12} className="shrink-0" />,
+      };
+    }
+
+    if (booking.pago_realizado) {
+      return {
+        label: 'Pagado',
+        className: 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/80',
+        icon: <CheckCircle2 size={12} className="shrink-0" />,
+      };
+    }
+
+    if (isExpiredBooking(booking)) {
+      return {
+        label: 'Expirada',
+        className: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200/80',
+        icon: <Clock size={12} className="shrink-0" />,
+      };
+    }
+
+    return {
+      label: 'Pend. pago',
+      className: 'bg-amber-50 text-amber-900 ring-1 ring-amber-200/80',
+      icon: <Clock size={12} className="shrink-0" />,
+    };
   };
 
   const applyTopFilter = (preset: 'today' | 'unpaidToday' | 'confirmedToday' | 'paidToday') => {
@@ -953,6 +983,8 @@ export default function BookingsPage() {
                 const bookingStart = getDate(booking.fecha_inicio);
                 const bookingEnd = getDate(booking.fecha_fin);
                 const isToday = bookingEnd >= todayStart && bookingStart <= todayEnd;
+                const isExpired = isExpiredBooking(booking);
+                const paymentBadge = getPaymentBadgeData(booking);
                 const isExpanded = Boolean(expandedBookings[booking.id]);
                 const isFirstOfDateGroup =
                   index === 0 ||
@@ -969,7 +1001,8 @@ export default function BookingsPage() {
                     <div
                       className={clsx(
                         'space-y-3 rounded-xl bg-white p-4 ring-1 ring-slate-200/60',
-                        isToday && 'bg-blue-50/25 ring-blue-200/50'
+                        isToday && 'bg-blue-50/25 ring-blue-200/50',
+                        isExpired && 'opacity-65 saturate-50'
                       )}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -1061,6 +1094,11 @@ export default function BookingsPage() {
                                 <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold px-2 py-0.5">
                                   <CheckCircle2 size={12} />
                                   Pagado
+                                </span>
+                              ) : isExpired ? (
+                                <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-0.5">
+                                  <Clock size={12} />
+                                  Expirada
                                 </span>
                               ) : (
                                 <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5">
@@ -1178,16 +1216,8 @@ export default function BookingsPage() {
                   getBookingServiceDateKey(booking) !== getBookingServiceDateKey(filteredBookings[index - 1]);
                 const agentName = getAgentName(booking);
                 const totalUnits = booking.items.reduce((sum, item) => sum + (item.cantidad || 0), 0);
-                const paymentBadgeClass = booking.reembolso_realizado
-                  ? 'bg-rose-50 text-rose-800 ring-1 ring-rose-200/80'
-                  : booking.pago_realizado
-                    ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200/80'
-                    : 'bg-amber-50 text-amber-900 ring-1 ring-amber-200/80';
-                const paymentBadgeLabel = booking.reembolso_realizado
-                  ? 'Reembolsado'
-                  : booking.pago_realizado
-                    ? 'Pagado'
-                    : 'Pend. pago';
+                const isExpired = isExpiredBooking(booking);
+                const paymentBadge = getPaymentBadgeData(booking);
 
                 return (
                   <div key={booking.id}>
@@ -1207,7 +1237,8 @@ export default function BookingsPage() {
                       className={clsx(
                         'border-t border-slate-100/80 px-4 py-3',
                         isFirstOfDateGroup && 'border-t-0',
-                        isToday && 'bg-blue-50/35'
+                        isToday && 'bg-blue-50/35',
+                        isExpired && 'opacity-65 saturate-50'
                       )}
                     >
                       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:gap-5">
@@ -1252,10 +1283,13 @@ export default function BookingsPage() {
                             <span
                               className={clsx(
                                 'inline-flex rounded-md px-2 py-0.5 text-[11px] font-semibold',
-                                paymentBadgeClass
+                                paymentBadge.className
                               )}
                             >
-                              {paymentBadgeLabel}
+                              <span className="inline-flex items-center gap-1">
+                                {paymentBadge.icon}
+                                {paymentBadge.label}
+                              </span>
                             </span>
                           </div>
                           <p className="text-lg font-semibold tabular-nums tracking-tight text-slate-900 lg:text-right">
@@ -1400,15 +1434,7 @@ function BookingDetailsModal({
   };
 
   const deliveryLocationLabel =
-    booking.ubicacion_entrega === 'marina_ibiza'
-      ? 'Marina Ibiza'
-      : booking.ubicacion_entrega === 'marina_botafoch'
-        ? 'Marina Botafoch'
-        : booking.ubicacion_entrega === 'club_nautico'
-          ? 'Club Náutico Ibiza'
-          : booking.ubicacion_entrega === 'otro'
-            ? (booking.ubicacion_entrega_detalle || 'Otro')
-            : booking.ubicacion_entrega || 'No indicado';
+    getDeliveryLocationLabel(booking.ubicacion_entrega, booking.ubicacion_entrega_detalle) || 'No especificado';
 
   const copyDatesAndDelivery = async () => {
     const text = [
@@ -1588,6 +1614,12 @@ function BookingDetailsModal({
                   <div className="flex justify-between items-center text-sm text-gray-600">
                     <span>Fuel</span>
                     <span>€{Number(booking.fuel_total || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                {getBookingDeliveryFee(booking) > 0 && (
+                  <div className="flex justify-between items-center text-sm text-gray-600">
+                    <span>Entrega</span>
+                    <span>€{getBookingDeliveryFee(booking).toLocaleString('es-ES', { minimumFractionDigits: 2 })}</span>
                   </div>
                 )}
                 <div className="flex justify-between items-center">

@@ -1,12 +1,25 @@
 import { addDays } from 'date-fns';
-import type { BookingItem, Product } from '@/types';
+import type { BookingItem, Product, ProductType } from '@/types';
 import { getProductDailyPrice } from '@/lib/productPricing';
 
+const INSTRUCTOR_PRODUCT_TYPES = new Set<ProductType>(['tabla', 'jetski']);
+const FUEL_PRODUCT_TYPES = new Set<ProductType>(['jetski']);
+const EFOIL_PRODUCT_TYPES = new Set<ProductType>(['tabla']);
+
+export const supportsInstructorOption = (product?: Product | null) =>
+  Boolean(product?.tipo && INSTRUCTOR_PRODUCT_TYPES.has(product.tipo));
+
+export const supportsFuelOption = (product?: Product | null) =>
+  Boolean(product?.tipo && FUEL_PRODUCT_TYPES.has(product.tipo));
+
+export const supportsEfoilBatteryOption = (product?: Product | null) =>
+  Boolean(product?.tipo && EFOIL_PRODUCT_TYPES.has(product.tipo));
+
 export const hasInstructorOption = (product?: Product | null) =>
-  Number(product?.instructor_price_per_day || 0) > 0;
+  supportsInstructorOption(product) && Number(product?.instructor_price_per_day || 0) > 0;
 
 export const hasFuelOption = (product?: Product | null) =>
-  Number(product?.fuel_price_per_day || 0) > 0;
+  supportsFuelOption(product) && Number(product?.fuel_price_per_day || 0) > 0;
 
 export const getBookingDayCount = (startDate: string, endDate: string): number => {
   const start = new Date(startDate);
@@ -81,4 +94,4 @@ export const getBookingItemFuelTotal = (
 export const doesBookingItemRequireNauticalLicense = (
   item: Pick<BookingItem, 'instructor_requested'>,
   product?: Product | null
-) => hasInstructorOption(product) && !item.instructor_requested;
+) => product?.tipo === 'jetski' && !item.instructor_requested;

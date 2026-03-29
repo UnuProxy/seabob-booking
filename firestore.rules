@@ -93,6 +93,16 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    match /invoices/{invoiceId} {
+      allow get, list, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    match /system_counters/{counterId} {
+      allow get, list, create, update: if isAdmin();
+      allow delete: if false;
+    }
+
     match /bookings/{bookingId} {
       allow get, list: if isStaff()
         || isDelivery()

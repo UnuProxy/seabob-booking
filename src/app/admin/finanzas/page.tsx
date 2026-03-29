@@ -8,7 +8,9 @@ import {
   AlertTriangle,
   Building2,
   CalendarClock,
+  CheckCircle2,
   CreditCard,
+  Download,
   Euro,
   Receipt,
   TrendingUp,
@@ -21,13 +23,10 @@ import { useAuthStore } from '@/store/authStore';
 import type { Booking, PaymentMethod, User } from '@/types';
 
 type MethodTotals = Record<PaymentMethod, { count: number; amount: number }>;
-
 type ChannelKey = 'direct' | 'broker' | 'agency' | 'colaborador';
+type ChannelTotals = Record<ChannelKey, { label: string; count: number; gross: number; net: number }>;
 
-type ChannelTotals = Record<
-  ChannelKey,
-  { label: string; count: number; gross: number; net: number }
->;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const getDate = (value: unknown): Date => {
   if (!value) return new Date();
@@ -40,7 +39,8 @@ const getDate = (value: unknown): Date => {
     return (value as { toDate: () => Date }).toDate();
   }
   if (value instanceof Date) return value;
-  return new Date(value as string | number);
+  const parsed = new Date(value as string | number);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 };
 
 const formatCurrency = (value: number) =>
@@ -61,7 +61,19 @@ const toDateInputValue = (value: unknown) => {
   return `${year}-${month}-${day}`;
 };
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const formatTimeAgo = (value: Date | null, nowTs: number) => {
+  if (!value) return 'ahora mismo';
+  const diffMinutes = Math.max(0, Math.floor((nowTs - value.getTime()) / 60000));
+  if (diffMinutes < 1) return 'ahora mismo';
+  if (diffMinutes < 60) return `hace ${diffMinutes} min`;
+  const hours = Math.floor(diffMinutes / 60);
+  if (hours < 24) return `hace ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return `hace ${days} d`;
+};
+
+const isExpiredBooking = (booking: Booking) =>
+  booking.estado === 'expirada' || Boolean(booking.expirado);
 
 export default function FinanzasPage() {
   const { user } = useAuthStore();
@@ -69,6 +81,17 @@ export default function FinanzasPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [users, setUsers] = useState<Record<string, User>>({});
   const [loading, setLoading] = useState(true);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [relativeNow, setRelativeNow] = useState(Date.now());
+  const [rangeDays, setRangeDays] = useState(30);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setRelativeNow(Date.now());
+    }, 60000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -85,6 +108,7 @@ export default function FinanzasPage() {
           ...doc.data(),
         })) as Booking[];
         setBookings(data);
+        setUpdatedAt(new Date());
         setLoading(false);
       },
       (error) => {
@@ -101,6 +125,7 @@ export default function FinanzasPage() {
           map[doc.id] = { id: doc.id, ...doc.data() } as User;
         });
         setUsers(map);
+        setUpdatedAt(new Date());
       },
       (error) => {
         console.error('Error fetching users for finances:', error);
@@ -133,9 +158,16 @@ export default function FinanzasPage() {
     let pendingCount = 0;
     let pendingAmount = 0;
     let commissionPending = 0;
+    let openCommissionCount = 0;
+    let newPendingSinceYesterday = 0;
+    let periodNetRevenue = 0;
+    let periodRefunded = 0;
     const pendingBookings: Booking[] = [];
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
+    const yesterdayStart = new Date(startOfToday.getTime() - DAY_MS);
+    const threeDaysStart = new Date(startOfToday.getTime() - 2 * DAY_MS);
+    const rangeStart = new Date(startOfToday.getTime() - (rangeDays - 1) * DAY_MS);
 
     const getOwnerInfo = (booking: Booking) => {
       const partnerId = booking.broker_id || booking.agency_id || booking.colaborador_id;
@@ -153,7 +185,7 @@ export default function FinanzasPage() {
     };
 
     const overdueUnpaid = bookings
-      .filter((booking) => !booking.pago_realizado && booking.estado !== 'cancelada')
+      .filter((booking) => !booking.pago_realizado && booking.estado !== 'cancelada' && !isExpiredBooking(booking))
       .map((booking) => {
         const dueDate = getDate(booking.fecha_inicio);
         dueDate.setHours(0, 0, 0, 0);
@@ -180,29 +212,42 @@ export default function FinanzasPage() {
     bookings.forEach((booking) => {
       const total = booking.precio_total || 0;
       const refund = booking.reembolso_realizado ? booking.reembolso_monto || 0 : 0;
+      const isExpired = isExpiredBooking(booking);
+      const createdAt = getDate(booking.creado_en || booking.fecha_inicio);
+      const inRange = createdAt >= rangeStart;
 
-      if (!booking.pago_realizado && booking.estado === 'pendiente' && !booking.expirado) {
+      if (!booking.pago_realizado && booking.estado === 'pendiente' && !isExpired) {
         pendingCount += 1;
         pendingAmount += total;
         pendingBookings.push(booking);
+        if (createdAt >= yesterdayStart) {
+          newPendingSinceYesterday += 1;
+        }
       }
 
-      if (booking.pago_realizado) {
+      if (booking.pago_realizado && !isExpired) {
         grossPaid += total;
         const rawMethod = booking.pago_metodo as string | undefined;
         const method = rawMethod && rawMethod in methodTotals ? (rawMethod as PaymentMethod) : 'otro';
         methodTotals[method].count += 1;
         methodTotals[method].amount += total;
+        if (inRange) {
+          periodNetRevenue += total - refund;
+        }
       }
 
       if (refund > 0) {
         refundedAmount += refund;
+        if (inRange) {
+          periodRefunded += refund;
+        }
       }
 
-      if (booking.pago_realizado && !booking.reembolso_realizado) {
+      if (booking.pago_realizado && !booking.reembolso_realizado && !isExpired) {
         const pending = (booking.comision_total || 0) - (booking.comision_pagada || 0);
         if (pending > 0) {
           commissionPending += pending;
+          openCommissionCount += 1;
         }
       }
 
@@ -213,14 +258,15 @@ export default function FinanzasPage() {
 
       channelTotals[channel].count += 1;
 
-      if (booking.pago_realizado) {
+      if (booking.pago_realizado && !isExpired) {
         channelTotals[channel].gross += total;
         channelTotals[channel].net += total - refund;
       }
     });
 
-    pendingBookings.sort(
-      (a, b) => (b.precio_total || 0) - (a.precio_total || 0)
+    pendingBookings.sort((a, b) => (b.precio_total || 0) - (a.precio_total || 0));
+    const recentPending = pendingBookings.filter(
+      (booking) => getDate(booking.creado_en || booking.fecha_inicio) >= threeDaysStart
     );
 
     return {
@@ -230,9 +276,19 @@ export default function FinanzasPage() {
       pendingCount,
       pendingAmount,
       commissionPending,
+      openCommissionCount,
+      newPendingSinceYesterday,
+      periodNetRevenue,
+      periodRefunded,
       methodTotals,
       channelTotals,
       pendingBookings: pendingBookings.slice(0, 5),
+      pendingSummary: {
+        totalCount: pendingCount,
+        totalAmount: pendingAmount,
+        recentCount: recentPending.length,
+        recentAmount: recentPending.reduce((sum, item) => sum + (item.precio_total || 0), 0),
+      },
       unpaidTracker: {
         totalCount: overdueUnpaid.length,
         totalAmount: overdueUnpaid.reduce((sum, item) => sum + (item.booking.precio_total || 0), 0),
@@ -244,14 +300,35 @@ export default function FinanzasPage() {
         longItems: longOverdue,
       },
     };
-  }, [bookings, users]);
+  }, [bookings, rangeDays, users]);
+
+  const handleExport = () => {
+    const lines = [
+      ['Metrica', 'Valor'],
+      ['Pendiente de cobro', finance.pendingAmount.toFixed(2)],
+      ['Reservas pendientes', String(finance.pendingCount)],
+      ['Ingresos netos', finance.netRevenue.toFixed(2)],
+      ['Reembolsos', finance.refundedAmount.toFixed(2)],
+      ['Comisiones pendientes', finance.commissionPending.toFixed(2)],
+      ['Impagos vencidos', String(finance.unpaidTracker.totalCount)],
+    ];
+
+    const csv = lines.map((line) => line.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `finanzas-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   if (!user) return null;
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-10 w-10 border-4 border-slate-200 border-t-blue-600"></div>
+      <div className="flex h-64 items-center justify-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600"></div>
       </div>
     );
   }
@@ -261,13 +338,13 @@ export default function FinanzasPage() {
       key: 'stripe',
       label: 'Stripe',
       icon: CreditCard,
-      tone: 'border-indigo-100 bg-indigo-50 text-indigo-700',
+      iconTone: 'bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100',
     },
     {
       key: 'tarjeta',
       label: 'Tarjeta manual',
       icon: Euro,
-      tone: 'border-amber-100 bg-amber-50 text-amber-700',
+      iconTone: 'bg-amber-50 text-amber-600 ring-1 ring-inset ring-amber-100',
     },
   ] as const;
 
@@ -278,163 +355,403 @@ export default function FinanzasPage() {
     { key: 'colaborador', icon: Users },
   ] as const;
 
+  const rangeLabel = `${rangeDays} dias`;
+  const lastUpdatedLabel = `Actualizado ${formatTimeAgo(updatedAt, relativeNow)}`;
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">Finanzas</h1>
-          <p className="text-slate-600">
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">Finanzas</h1>
+          <p className="text-sm text-slate-500">
             Resumen financiero en tiempo real para decisiones rapidas.
           </p>
         </div>
-        <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-          <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-          Actualizado
+
+        <div className="flex items-center gap-3 text-sm text-slate-500">
+          <div className="inline-flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            <span>{lastUpdatedLabel}</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleExport}
+            className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-slate-600 transition hover:bg-white hover:text-slate-900"
+          >
+            <Download className="h-4 w-4" />
+            Exportar
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-[28px] border border-slate-200/80 bg-white p-3 shadow-sm shadow-slate-200/50 sm:p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="inline-flex items-center gap-2 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-3 py-2 text-sm font-medium text-emerald-700">
+            <CheckCircle2 className="h-4 w-4" />
+            {lastUpdatedLabel}
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              onClick={() => document.getElementById('impagados-vencidos')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+            >
+              Ver impagados
+            </button>
+
+            <div className="relative">
+              <select
+                value={rangeDays}
+                onChange={(event) => setRangeDays(Number(event.target.value))}
+                className="h-11 rounded-2xl border border-slate-200 bg-white pl-4 pr-9 text-sm font-medium text-slate-700 outline-none ring-0 transition focus:border-blue-300"
+              >
+                <option value={7}>7 dias</option>
+                <option value={30}>30 dias</option>
+                <option value={90}>90 dias</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
+        <div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Pendiente de cobro
               </p>
-              <p className="text-2xl font-bold text-amber-600 mt-2">
+              <p className="text-3xl font-semibold tracking-tight text-amber-600">
                 {formatCurrency(finance.pendingAmount)}
               </p>
             </div>
-            <div className="h-11 w-11 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center">
-              <Wallet size={20} />
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 ring-1 ring-inset ring-amber-100">
+              <Wallet className="h-5 w-5" />
             </div>
           </div>
-          <p className="text-xs text-slate-500 mt-3">
-            {finance.pendingCount} reservas sin pago
+          <p className="mt-3 text-sm font-medium text-slate-700">
+            {finance.pendingCount} reservas sin pagar
+          </p>
+          <p className="mt-1 text-sm text-emerald-600">
+            {finance.newPendingSinceYesterday > 0
+              ? `+${finance.newPendingSinceYesterday} desde ayer`
+              : 'Sin cambios desde ayer'}
           </p>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
+        <div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Ingresos
               </p>
-              <p className="text-2xl font-bold text-emerald-600 mt-2">
+              <p className="text-3xl font-semibold tracking-tight text-emerald-600">
                 {formatCurrency(finance.netRevenue)}
               </p>
             </div>
-            <div className="h-11 w-11 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
-              <TrendingUp size={20} />
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-100">
+              <TrendingUp className="h-5 w-5" />
             </div>
           </div>
-          <p className="text-xs text-slate-500 mt-3">Confirmados menos reembolsos</p>
+          <p className="mt-3 text-sm font-medium text-slate-700">Confirmados menos reembolsos</p>
+          <p className="mt-1 text-sm text-emerald-600">
+            +{formatCurrency(finance.periodNetRevenue)} en {rangeLabel}
+          </p>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
+        <div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Reembolsos
               </p>
-              <p className="text-2xl font-bold text-rose-600 mt-2">
+              <p className="text-3xl font-semibold tracking-tight text-rose-600">
                 {formatCurrency(finance.refundedAmount)}
               </p>
             </div>
-            <div className="h-11 w-11 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
-              <Receipt size={20} />
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 ring-1 ring-inset ring-rose-100">
+              <Receipt className="h-5 w-5" />
             </div>
           </div>
-          <p className="text-xs text-slate-500 mt-3">Pagos devueltos</p>
+          <p className="mt-3 text-sm font-medium text-slate-700">Pagos devueltos</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {formatCurrency(finance.periodRefunded)} en {rangeLabel}
+          </p>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
+        <div className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 Comisiones pendientes
               </p>
-              <p className="text-2xl font-bold text-indigo-600 mt-2">
+              <p className="text-3xl font-semibold tracking-tight text-indigo-600">
                 {formatCurrency(finance.commissionPending)}
               </p>
             </div>
-            <div className="h-11 w-11 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center">
-              <Users size={20} />
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100">
+              <Users className="h-5 w-5" />
             </div>
           </div>
-          <p className="text-xs text-slate-500 mt-3">Solo reservas pagadas</p>
+          <p className="mt-3 text-sm font-medium text-slate-700">Solo reservas pagadas</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {finance.openCommissionCount} reservas con saldo abierto
+          </p>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Pagos por metodo</h2>
-              <p className="text-sm text-slate-500">No incluye reembolsos.</p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+              Pendientes prioritarios
+            </h2>
+            <p className="text-sm text-slate-500">
+              Reservas sin pago ordenadas por importe.
+            </p>
+          </div>
+
+          {finance.pendingBookings.length === 0 ? (
+            <div className="rounded-3xl border border-slate-200 bg-slate-50/80 px-5 py-6">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-lg font-semibold tracking-tight text-slate-950">
+                    No hay reservas pendientes
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Todo esta al dia en este momento
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {finance.pendingBookings.map((booking) => (
+                <div
+                  key={booking.id}
+                  className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-slate-50/70 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-900">
+                      {booking.numero_reserva} · {booking.cliente?.nombre || 'Cliente'}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Inicio: {formatDate(booking.fecha_inicio)}
+                    </p>
+                  </div>
+                  <div className="text-left sm:text-right">
+                    <p className="text-lg font-semibold text-amber-600">
+                      {formatCurrency(booking.precio_total || 0)}
+                    </p>
+                    <p className="text-xs text-slate-500">Pendiente</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-3xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Total pendientes
+              </p>
+              <p className="mt-2 text-sm text-slate-500">
+                {finance.pendingSummary.totalCount} reservas
+              </p>
+                <p className="mt-1 text-xl font-semibold tracking-tight text-slate-950">
+                {formatCurrency(finance.pendingSummary.totalAmount)}
+              </p>
+            </div>
+            <div className="rounded-3xl border border-amber-100 bg-amber-50/60 px-4 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                Ultimos 3 dias
+              </p>
+              <p className="mt-2 text-sm text-amber-700/80">
+                {finance.pendingSummary.recentCount} reservas
+              </p>
+                <p className="mt-1 text-xl font-semibold tracking-tight text-amber-900">
+                {formatCurrency(finance.pendingSummary.recentAmount)}
+              </p>
             </div>
           </div>
+        </section>
+
+        <section
+          id="impagados-vencidos"
+          className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/50"
+        >
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+              Impagos vencidos
+            </h2>
+            <p className="text-sm text-slate-500">
+              Netos despues de reembolsos.
+            </p>
+          </div>
+
+          {finance.unpaidTracker.totalCount === 0 ? (
+            <div className="rounded-3xl border border-slate-200 bg-slate-50/80 px-5 py-6">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 ring-1 ring-inset ring-rose-100">
+                  <CalendarClock className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-lg font-semibold tracking-tight text-slate-950">
+                    No hay impagos vencidos
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Ultima revision: {updatedAt ? `${formatTimeAgo(updatedAt, relativeNow)}` : 'ahora mismo'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {[...finance.unpaidTracker.longItems, ...finance.unpaidTracker.recentItems].slice(0, 5).map((item) => (
+                <div
+                  key={item.booking.id}
+                  className="rounded-3xl border border-slate-200 bg-slate-50/70 px-4 py-4"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-slate-900">
+                        {item.booking.numero_reserva} · {item.booking.cliente?.nombre || 'Cliente'}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {item.booking.cliente?.email || 'Sin email'}
+                      </p>
+                      <p className="mt-2 inline-flex items-center gap-1 text-xs text-slate-600">
+                        <Building2 className="h-3.5 w-3.5" />
+                        {item.ownerName} · {item.ownerType}
+                      </p>
+                      <p
+                        className={`mt-1 inline-flex items-center gap-1 text-xs ${
+                          item.daysOverdue > 3 ? 'text-rose-700' : 'text-amber-700'
+                        }`}
+                      >
+                        {item.daysOverdue > 3 ? (
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                        ) : (
+                          <CalendarClock className="h-3.5 w-3.5" />
+                        )}
+                        Vence: {formatDate(item.dueDate)} · {item.daysOverdue} dias
+                      </p>
+                    </div>
+
+                    <div className="shrink-0 text-right">
+                      <p className="text-lg font-semibold text-slate-900">
+                        {formatCurrency(item.booking.precio_total || 0)}
+                      </p>
+                      <Link
+                        href={`/admin/reservas?bookingRef=${encodeURIComponent(item.booking.numero_reserva)}&serviceDate=${toDateInputValue(item.booking.fecha_inicio)}`}
+                        className="mt-1 inline-flex text-xs font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-800"
+                      >
+                        Ver reserva
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-3xl border border-slate-200 bg-white px-4 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Total vencidas
+              </p>
+              <p className="mt-2 text-sm text-slate-500">
+                {finance.unpaidTracker.totalCount} reservas
+              </p>
+              <p className="mt-1 text-xl font-semibold tracking-tight text-slate-950">
+                {formatCurrency(finance.unpaidTracker.totalAmount)}
+              </p>
+            </div>
+            <div className="rounded-3xl border border-amber-100 bg-amber-50/60 px-4 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                Ultimos 3 dias
+              </p>
+              <p className="mt-2 text-sm text-amber-700/80">
+                {finance.unpaidTracker.recentCount} reservas
+              </p>
+              <p className="mt-1 text-xl font-semibold tracking-tight text-amber-900">
+                {formatCurrency(finance.unpaidTracker.recentAmount)}
+              </p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+              Pagos por metodo
+            </h2>
+            <p className="text-sm text-slate-500">No incluye reembolsos.</p>
+          </div>
+
           <div className="space-y-3">
             {methodCards.map((method) => {
               const totals = finance.methodTotals[method.key];
               const Icon = method.icon;
+
               return (
                 <div
                   key={method.key}
-                  className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-4 py-3"
+                  className="flex items-center justify-between rounded-3xl border border-slate-200 bg-slate-50/70 px-4 py-4"
                 >
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`h-10 w-10 rounded-lg flex items-center justify-center ${method.tone}`}
-                    >
-                      <Icon size={18} />
+                    <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${method.iconTone}`}>
+                      <Icon className="h-4.5 w-4.5" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">
-                        {method.label}
-                      </p>
+                      <p className="text-sm font-semibold text-slate-900">{method.label}</p>
                       <p className="text-xs text-slate-500">{totals.count} pagos</p>
                     </div>
                   </div>
-                  <p className="text-sm font-bold text-slate-900">
+                    <p className="text-base font-semibold text-slate-950">
                     {formatCurrency(totals.amount)}
                   </p>
                 </div>
               );
             })}
           </div>
-        </div>
+        </section>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Ingresos por canal</h2>
-              <p className="text-sm text-slate-500">Netos despues de reembolsos.</p>
-            </div>
+        <section className="rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/50">
+          <div className="mb-4">
+            <h2 className="text-xl font-semibold tracking-tight text-slate-950">
+              Ingresos por canal
+            </h2>
+            <p className="text-sm text-slate-500">Netos despues de reembolsos.</p>
           </div>
+
           <div className="space-y-3">
             {channelCards.map((channel) => {
               const totals = finance.channelTotals[channel.key];
               const Icon = channel.icon;
+
               return (
                 <div
                   key={channel.key}
-                  className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-4 py-3"
+                  className="flex items-center justify-between rounded-3xl border border-slate-200 bg-slate-50/70 px-4 py-4"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-slate-200 text-slate-600 flex items-center justify-center">
-                      <Icon size={18} />
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-200">
+                      <Icon className="h-4.5 w-4.5" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">
-                        {totals.label}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {totals.count} reservas
-                      </p>
+                      <p className="text-sm font-semibold text-slate-900">{totals.label}</p>
+                      <p className="text-xs text-slate-500">{totals.count} reservas</p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-bold text-slate-900">
+                    <p className="text-base font-semibold text-slate-950">
                       {formatCurrency(totals.net)}
                     </p>
                     <p className="text-xs text-slate-500">
@@ -445,178 +762,7 @@ export default function FinanzasPage() {
               );
             })}
           </div>
-        </div>
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">Pendientes prioritarios</h2>
-            <p className="text-sm text-slate-500">
-              Reservas sin pago ordenadas por importe.
-            </p>
-          </div>
-        </div>
-        {finance.pendingBookings.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-            No hay reservas pendientes de pago.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {finance.pendingBookings.map((booking) => (
-              <div
-                key={booking.id}
-                className="flex flex-col gap-3 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {booking.numero_reserva} · {booking.cliente?.nombre || 'Cliente'}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Inicio: {formatDate(booking.fecha_inicio)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-bold text-amber-600">
-                    {formatCurrency(booking.precio_total || 0)}
-                  </p>
-                  <p className="text-xs text-slate-500">Pendiente</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between mb-5">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">Control de impagos vencidos</h2>
-            <p className="text-sm text-slate-500">
-              Solo reservas no pagadas con fecha de servicio ya vencida.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="uppercase tracking-wide text-slate-500 font-semibold">Total vencidas</p>
-              <p className="font-bold text-slate-900 mt-1">
-                {finance.unpaidTracker.totalCount} · {formatCurrency(finance.unpaidTracker.totalAmount)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-              <p className="uppercase tracking-wide text-amber-700 font-semibold">Ultimos 3 dias</p>
-              <p className="font-bold text-amber-800 mt-1">
-                {finance.unpaidTracker.recentCount} · {formatCurrency(finance.unpaidTracker.recentAmount)}
-              </p>
-            </div>
-            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
-              <p className="uppercase tracking-wide text-rose-700 font-semibold">Mas de 3 dias</p>
-              <p className="font-bold text-rose-800 mt-1">
-                {finance.unpaidTracker.longCount} · {formatCurrency(finance.unpaidTracker.longAmount)}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {finance.unpaidTracker.totalCount === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-            No hay impagos vencidos actualmente.
-          </div>
-        ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border border-rose-100 bg-rose-50/40 p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <AlertTriangle size={16} className="text-rose-600" />
-                <h3 className="text-sm font-bold text-rose-900">Vencidas hace mas de 3 dias</h3>
-              </div>
-              {finance.unpaidTracker.longItems.length === 0 ? (
-                <p className="text-sm text-slate-500">Sin reservas en este tramo.</p>
-              ) : (
-                <div className="space-y-2">
-                  {finance.unpaidTracker.longItems.map((item) => (
-                    <div key={item.booking.id} className="rounded-lg border border-rose-100 bg-white px-3 py-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-900 truncate">
-                            {item.booking.numero_reserva} · {item.booking.cliente?.nombre || 'Cliente'}
-                          </p>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {item.booking.cliente?.email || 'Sin email'}
-                          </p>
-                          <p className="text-xs text-slate-600 mt-1 inline-flex items-center gap-1">
-                            <Building2 size={12} />
-                            {item.ownerName} · {item.ownerType}
-                          </p>
-                          <p className="text-xs text-rose-700 mt-1 inline-flex items-center gap-1">
-                            <CalendarClock size={12} />
-                            Vence: {formatDate(item.dueDate)} · {item.daysOverdue} dias
-                          </p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-sm font-bold text-rose-700">
-                            {formatCurrency(item.booking.precio_total || 0)}
-                          </p>
-                          <Link
-                            href={`/admin/reservas?bookingRef=${encodeURIComponent(item.booking.numero_reserva)}&serviceDate=${toDateInputValue(item.booking.fecha_inicio)}`}
-                            className="mt-1 inline-flex text-xs font-semibold text-blue-700 hover:text-blue-800 underline underline-offset-2"
-                          >
-                            Ver reserva
-                          </Link>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-xl border border-amber-100 bg-amber-50/40 p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <CalendarClock size={16} className="text-amber-600" />
-                <h3 className="text-sm font-bold text-amber-900">Vencidas en los ultimos 3 dias</h3>
-              </div>
-              {finance.unpaidTracker.recentItems.length === 0 ? (
-                <p className="text-sm text-slate-500">Sin reservas en este tramo.</p>
-              ) : (
-                <div className="space-y-2">
-                  {finance.unpaidTracker.recentItems.map((item) => (
-                    <div key={item.booking.id} className="rounded-lg border border-amber-100 bg-white px-3 py-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-900 truncate">
-                            {item.booking.numero_reserva} · {item.booking.cliente?.nombre || 'Cliente'}
-                          </p>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {item.booking.cliente?.email || 'Sin email'}
-                          </p>
-                          <p className="text-xs text-slate-600 mt-1 inline-flex items-center gap-1">
-                            <Building2 size={12} />
-                            {item.ownerName} · {item.ownerType}
-                          </p>
-                          <p className="text-xs text-amber-700 mt-1 inline-flex items-center gap-1">
-                            <CalendarClock size={12} />
-                            Vence: {formatDate(item.dueDate)} · {item.daysOverdue} dias
-                          </p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-sm font-bold text-amber-700">
-                            {formatCurrency(item.booking.precio_total || 0)}
-                          </p>
-                          <Link
-                            href={`/admin/reservas?bookingRef=${encodeURIComponent(item.booking.numero_reserva)}&serviceDate=${toDateInputValue(item.booking.fecha_inicio)}`}
-                            className="mt-1 inline-flex text-xs font-semibold text-blue-700 hover:text-blue-800 underline underline-offset-2"
-                          >
-                            Ver reserva
-                          </Link>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+        </section>
       </div>
     </div>
   );

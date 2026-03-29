@@ -10,8 +10,8 @@ import { es } from 'date-fns/locale';
 import { Plus, Eye, Share2, Calendar, Euro, Wallet, ArrowRight, Package, X } from 'lucide-react';
 import Link from 'next/link';
 import { usePartnerCommissions } from '@/lib/firebase/hooks/usePartnerCommissions';
-import { getProductBaseDailyPrice, getProductDailyPrice } from '@/lib/productPricing';
-import { getProductTypeLabel } from '@/lib/productTypes';
+import { getProductBaseDailyPrice } from '@/lib/productPricing';
+import { getProductTypeLabel, sortProductsByPriority } from '@/lib/productTypes';
 
 function getDate(dateValue: any): Date {
   if (!dateValue) return new Date();
@@ -113,7 +113,7 @@ export default function BrokerDashboard() {
   useEffect(() => {
     const productsQuery = query(collection(db, 'products'), orderBy('nombre'));
     const unsubscribe = onSnapshot(productsQuery, (snapshot) => {
-      setProducts(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Product)));
+      setProducts(sortProductsByPriority(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Product))));
     });
 
     return () => unsubscribe();
@@ -363,14 +363,8 @@ export default function BrokerDashboard() {
                 <div className="mt-4 flex items-end justify-between gap-3">
                   <div>
                     <p className="text-2xl font-bold text-slate-900">{formatPrice(getProductBaseDailyPrice(product))}</p>
-                    <p className="text-xs text-slate-500">
-                      {product.incluir_iva ? 'Precio con IVA incluido' : 'Precio sin IVA'}
-                    </p>
-                    {product.incluir_iva ? (
-                      <p className="mt-2 text-sm font-semibold text-emerald-700">
-                        Total: {formatPrice(getProductDailyPrice(product))}
-                      </p>
-                    ) : null}
+                    <p className="text-xs text-slate-500">Precio sin IVA</p>
+                    <p className="mt-2 text-sm font-semibold text-emerald-700">IVA se aplica en la reserva</p>
                   </div>
                   <span className="text-sm font-medium text-blue-600">Ver info</span>
                 </div>
@@ -407,21 +401,11 @@ export default function BrokerDashboard() {
                   {selectedProduct.descripcion || 'Sin descripción disponible.'}
                 </p>
                 <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-sm text-slate-500">
-                    {selectedProduct.incluir_iva ? 'Precio por dia con IVA incluido' : 'Precio por dia sin IVA'}
-                  </p>
+                  <p className="text-sm text-slate-500">Precio por dia sin IVA</p>
                   <p className="mt-1 text-3xl font-bold text-slate-900">
                     {formatPrice(getProductBaseDailyPrice(selectedProduct))}
                   </p>
-                  {selectedProduct.incluir_iva ? (
-                    <>
-                      <p className="mt-4 text-sm text-slate-500">Total por dia</p>
-                      <p className="mt-1 text-3xl font-bold text-emerald-700">
-                        {formatPrice(getProductDailyPrice(selectedProduct))}
-                      </p>
-                      <p className="mt-2 text-xs text-slate-500">IVA incluido (+21%).</p>
-                    </>
-                  ) : null}
+                  <p className="mt-2 text-xs text-slate-500">El IVA se aplica en la reserva y en el cobro final.</p>
                 </div>
                 <div className="mt-auto pt-6">
                   <Link
