@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Product, ProductType } from '@/types';
 import { addDoc, collection, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { app, db, auth, storageBucketCandidates } from '@/lib/firebase/config';
+import { supportsEfoilBatteryOption, supportsFuelOption, supportsInstructorOption } from '@/lib/bookingExtras';
 import { SEASONAL_PRICE_MONTHS } from '@/lib/productPricing';
 import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadBytes } from 'firebase/storage';
 import { ImageUp, Trash2, X } from 'lucide-react';
@@ -44,15 +45,14 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [removeCurrentImage, setRemoveCurrentImage] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const formRef = useRef<HTMLFormElement | null>(null);
   const [formData, setFormData] = useState<Partial<Product>>({
     nombre: '',
     descripcion: '',
     precio_diario: undefined,
     precios_por_mes: {},
     efoil_battery: '',
-    precio_temporada_baja: undefined,
-    precio_temporada_alta: undefined,
-    incluir_iva: false,
+    incluir_iva: true,
     comision: undefined,
     tipo: 'seabob',
     imagen_url: '',
@@ -62,16 +62,18 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
   const firstConfiguredMonthlyPrice = SEASONAL_PRICE_MONTHS.map(({ key }) => formData.precios_por_mes?.[key]).find(
     (value) => value !== undefined && value !== null && Number(value) > 0
   );
-  const isEfoil = formData.tipo === 'tabla';
+  const supportsInstructorFields = supportsInstructorOption({ tipo: formData.tipo } as Product);
+  const supportsFuelFields = supportsFuelOption({ tipo: formData.tipo } as Product);
+  const supportsBatteryFields = supportsEfoilBatteryOption({ tipo: formData.tipo } as Product);
+  const showInstructorInExtrasStep = supportsInstructorFields && !supportsBatteryFields;
+  const showOnlyCommissionInExtrasStep = !showInstructorInExtrasStep && !supportsFuelFields;
+  const editedProductSupportsBattery = supportsEfoilBatteryOption(productToEdit ?? null);
   const hasMonthlyOverrides = SEASONAL_PRICE_MONTHS.some(
     ({ key }) => Number(formData.precios_por_mes?.[key] || 0) > 0
   );
   const [showSeasonalOverrides, setShowSeasonalOverrides] = useState(
     Boolean(
-      productToEdit?.precio_temporada_baja ||
-        productToEdit?.precio_temporada_alta ||
-        productToEdit?.efoil_battery ||
-        hasMonthlyOverrides
+      (editedProductSupportsBattery && productToEdit?.efoil_battery) || hasMonthlyOverrides
     )
   );
   const [showExtras, setShowExtras] = useState(
@@ -81,6 +83,44 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
         productToEdit?.fuel_price_per_day
     )
   );
+
+  useEffect(() => {
+    setFormData((prev) => {
+      const next = { ...prev };
+
+      if (!supportsInstructorOption({ tipo: next.tipo } as Product)) {
+        next.instructor_price_per_day = undefined;
+        next.instructor_incluir_iva = false;
+      }
+
+      if (!supportsFuelOption({ tipo: next.tipo } as Product)) {
+        next.fuel_price_per_day = undefined;
+      }
+
+      if (!supportsEfoilBatteryOption({ tipo: next.tipo } as Product)) {
+        next.efoil_battery = '';
+      }
+
+      return next;
+    });
+  }, [formData.tipo]);
+
+  useEffect(() => {
+    if (supportsFuelFields || showInstructorInExtrasStep) {
+      setShowExtras(true);
+    }
+  }, [showInstructorInExtrasStep, supportsFuelFields]);
+
+  useLayoutEffect(() => {
+    if (!formRef.current) return;
+    formRef.current.scrollTop = 0;
+    requestAnimationFrame(() => {
+      if (formRef.current) {
+        formRef.current.scrollTop = 0;
+      }
+    });
+  }, [currentStep]);
+
   const steps = [
     { title: 'Basico', description: 'Nombre, tipo y estado' },
     { title: 'Precios', description: 'Tarifa y extras opcionales' },
@@ -88,25 +128,26 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
   ];
   const isLastStep = currentStep === steps.length - 1;
 
+  const setStep = (nextStep: number) => {
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    setCurrentStep(Math.min(Math.max(nextStep, 0), steps.length - 1));
+  };
+
   const goToNextStep = () => {
     if (currentStep === 0 && !String(formData.nombre || '').trim()) {
       alert('Añade al menos el nombre del producto para continuar.');
       return;
     }
-    setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
+    setStep(currentStep + 1);
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {
-    if (!isLastStep) {
-      e.preventDefault();
-      goToNextStep();
-      return;
-    }
-    void handleSubmit(e);
+    e.preventDefault();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async () => {
     setLoading(true);
 
     try {
@@ -118,20 +159,19 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
       const shouldDeleteCurrentImage = Boolean(productToEdit?.id && previousImageUrl && (removeCurrentImage || imageFile));
       const fallbackDailyPrice =
         Number(firstConfiguredMonthlyPrice) ||
+        Number(formData.precio_diario) ||
         Number(productToEdit?.precio_diario) ||
-        Number(formData.precio_temporada_alta) ||
-        Number(formData.precio_temporada_baja) ||
         0;
 
       const productData: Record<string, unknown> = {
         ...formData,
         precio_diario: fallbackDailyPrice,
-        instructor_price_per_day: Number(formData.instructor_price_per_day) || 0,
-        instructor_incluir_iva: Boolean(formData.instructor_incluir_iva),
-        fuel_price_per_day: Number(formData.fuel_price_per_day) || 0,
-        efoil_battery: String(formData.efoil_battery ?? '').trim(),
-        precio_temporada_baja: Number(formData.precio_temporada_baja) || 0,
-        precio_temporada_alta: Number(formData.precio_temporada_alta) || 0,
+        instructor_price_per_day: supportsInstructorFields ? Number(formData.instructor_price_per_day) || 0 : 0,
+        instructor_incluir_iva: supportsInstructorFields && Boolean(formData.instructor_incluir_iva),
+        fuel_price_per_day: supportsFuelFields ? Number(formData.fuel_price_per_day) || 0 : 0,
+        efoil_battery: supportsBatteryFields ? String(formData.efoil_battery ?? '').trim() : '',
+        precio_temporada_baja: 0,
+        precio_temporada_alta: 0,
         precios_por_mes: Object.fromEntries(
           SEASONAL_PRICE_MONTHS.map(({ key }) => {
             const value = formData.precios_por_mes?.[key];
@@ -139,7 +179,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
           }).filter(([, value]) => value !== null)
         ),
         deposito: 0,
-        incluir_iva: Boolean(formData.incluir_iva),
+        incluir_iva: true,
         comision: Number(formData.comision) || 0,
         imagen_url: removeCurrentImage && !imageFile ? '' : formData.imagen_url || '',
         creado_por: auth.currentUser?.uid,
@@ -273,7 +313,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
           </button>
         </div>
 
-        <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-slate-50">
+        <form ref={formRef} onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 bg-slate-50">
           <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               {steps.map((step, index) => {
@@ -283,7 +323,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
                   <button
                     key={step.title}
                     type="button"
-                    onClick={() => setCurrentStep(index)}
+                    onClick={() => setStep(index)}
                     className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-left text-xs transition ${
                       isActive
                         ? 'bg-slate-900 text-white'
@@ -380,28 +420,10 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
           <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
             <div>
               <h3 className="text-lg font-bold text-slate-900">Precios</h3>
-              <p className="text-sm text-slate-500">Configura IVA y tarifa base. Temporadas y meses son opcionales.</p>
+              <p className="text-sm text-slate-500">Configura la tarifa base. Los precios mostrados incluyen el calculo de IVA.</p>
             </div>
 
             <div className="mt-5 space-y-5">
-              <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
-                <input
-                  id="incluir-iva"
-                  type="checkbox"
-                  checked={Boolean(formData.incluir_iva)}
-                  onChange={(e) => setFormData({ ...formData, incluir_iva: e.target.checked })}
-                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <div>
-                  <label htmlFor="incluir-iva" className="block text-sm font-medium text-gray-800">
-                    Incluir IVA (+21%) en este producto
-                  </label>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Actívalo si este producto ya debe mostrarse con IVA incluido.
-                  </p>
-                </div>
-              </div>
-
               <div className="rounded-2xl border border-slate-200 bg-slate-50/70">
                 <button
                   type="button"
@@ -409,11 +431,13 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
                   className="flex w-full items-center justify-between gap-3 px-4 py-4 text-left sm:px-5"
                 >
                   <div>
-                    <h4 className="text-sm font-bold text-slate-900">Temporadas y precios por mes</h4>
+                    <h4 className="text-sm font-bold text-slate-900">Precios por mes</h4>
                     <p className="mt-1 text-xs text-slate-500">
                       {showSeasonalOverrides
-                        ? 'Configura batería efoil, temporada alta/baja y meses concretos.'
-                        : 'Opcional. Solo si quieres afinar la tarifa por temporada o por mes.'}
+                        ? supportsBatteryFields
+                          ? 'Configura bateria efoil y los precios mensuales de temporada.'
+                          : 'Configura los precios mensuales de temporada.'
+                        : 'Opcional. Solo si quieres ajustar la tarifa por mes.'}
                     </p>
                   </div>
                   <span className="text-xs font-semibold text-slate-500">
@@ -423,7 +447,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
 
                 {showSeasonalOverrides ? (
                   <div className="border-t border-slate-200 px-4 pb-4 pt-4 sm:px-5 sm:pb-5 space-y-4">
-                    {isEfoil ? (
+                    {supportsBatteryFields ? (
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                         <div className="md:col-span-2">
                           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -439,143 +463,70 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
                           <p className="text-xs text-gray-500 mt-1">Opcional. Visible en ficha y útil para efoils.</p>
                         </div>
 
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Monitor / Instructor (€ / día)
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={formData.instructor_price_per_day ?? ''}
-                            onChange={(e) =>
-                              setFormData({
-                                ...formData,
-                                instructor_price_per_day: e.target.value === '' ? undefined : Number(e.target.value),
-                              })
-                            }
-                            className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
-                            placeholder="0"
-                          />
-                          <p className="text-xs text-gray-500 mt-1">
-                            Si el efoil puede llevar monitor, indica aquí el precio por día.
-                          </p>
-                        </div>
+                        {supportsInstructorFields ? (
+                          <>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Monitor / Instructor (€ / día)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={formData.instructor_price_per_day ?? ''}
+                                onChange={(e) =>
+                                  setFormData({
+                                    ...formData,
+                                    instructor_price_per_day: e.target.value === '' ? undefined : Number(e.target.value),
+                                  })
+                                }
+                                className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
+                                placeholder="0"
+                              />
+                              <p className="text-xs text-gray-500 mt-1">
+                                Precio del monitor para efoil por día.
+                              </p>
+                            </div>
 
-                        <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-4">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(formData.instructor_incluir_iva)}
-                            onChange={(e) =>
-                              setFormData({
-                                ...formData,
-                                instructor_incluir_iva: e.target.checked,
-                              })
-                            }
-                            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <div>
-                            <span className="block text-sm font-medium text-gray-800">
-                              Incluir IVA (+21%) en monitor
-                            </span>
-                            <span className="block text-xs text-gray-500 mt-1">
-                              El monitor del efoil se guardará con IVA incluido.
-                            </span>
-                          </div>
-                        </label>
+                            <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-4">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(formData.instructor_incluir_iva)}
+                                onChange={(e) =>
+                                  setFormData({
+                                    ...formData,
+                                    instructor_incluir_iva: e.target.checked,
+                                  })
+                                }
+                                className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              <div>
+                                <span className="block text-sm font-medium text-gray-800">
+                                  Incluir IVA (+21%) en monitor
+                                </span>
+                                <span className="block text-xs text-gray-500 mt-1">
+                                  El monitor se mostrará y se cobrará con IVA incluido.
+                                </span>
+                              </div>
+                            </label>
 
-                        {formData.instructor_price_per_day !== undefined &&
-                        Number(formData.instructor_price_per_day) > 0 &&
-                        formData.instructor_incluir_iva ? (
-                          <p className="text-xs font-medium text-emerald-700 md:col-span-2">
-                            Monitor con IVA: €
-                            {Math.round(Number(formData.instructor_price_per_day) * 1.21).toLocaleString('es-ES', {
-                              maximumFractionDigits: 0,
-                            })}
-                            / día
-                          </p>
+                            {formData.instructor_price_per_day !== undefined &&
+                            Number(formData.instructor_price_per_day) > 0 &&
+                            formData.instructor_incluir_iva ? (
+                              <p className="text-xs font-medium text-emerald-700 md:col-span-2">
+                                Monitor con IVA: €
+                                {Math.round(Number(formData.instructor_price_per_day) * 1.21).toLocaleString('es-ES', {
+                                  maximumFractionDigits: 0,
+                                })}
+                                / día
+                              </p>
+                            ) : null}
+                          </>
                         ) : null}
                       </div>
                     ) : null}
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Precio temporada baja (€ / día)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={formData.precio_temporada_baja ?? ''}
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              precio_temporada_baja: e.target.value === '' ? undefined : Number(e.target.value),
-                            })
-                          }
-                          className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
-                          placeholder="0"
-                          inputMode="numeric"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          Abril–junio y septiembre–octubre, si no hay precio específico de ese mes.
-                        </p>
-                        {formData.precio_temporada_baja !== undefined &&
-                        Number(formData.precio_temporada_baja) > 0 &&
-                        formData.incluir_iva ? (
-                          <p className="text-xs font-medium text-emerald-700 mt-2">
-                            Con IVA: €
-                            {Math.round(Number(formData.precio_temporada_baja) * 1.21).toLocaleString('es-ES', {
-                              maximumFractionDigits: 0,
-                            })}{' '}
-                            / día
-                          </p>
-                        ) : null}
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Precio temporada alta – Julio y agosto (€ / día)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={formData.precio_temporada_alta ?? ''}
-                          onChange={(e) =>
-                            setFormData({
-                              ...formData,
-                              precio_temporada_alta: e.target.value === '' ? undefined : Number(e.target.value),
-                            })
-                          }
-                          className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
-                          placeholder="0"
-                          inputMode="numeric"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          Solo julio y agosto, si no hay precio mensual para esos meses.
-                        </p>
-                        {formData.precio_temporada_alta !== undefined &&
-                        Number(formData.precio_temporada_alta) > 0 &&
-                        formData.incluir_iva ? (
-                          <p className="text-xs font-medium text-emerald-700 mt-2">
-                            Con IVA: €
-                            {Math.round(Number(formData.precio_temporada_alta) * 1.21).toLocaleString('es-ES', {
-                              maximumFractionDigits: 0,
-                            })}{' '}
-                            / día
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Precios por Mes (€ / día)
-                      </label>
-                      <p className="text-xs text-gray-500 mb-3">
-                        Introduce solo los meses que uses. Estos valores mandan sobre la temporada alta/baja.
-                      </p>
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                         {SEASONAL_PRICE_MONTHS.map(({ key, label }) => (
                           <div key={key} className="rounded-2xl border border-slate-200 bg-white p-3">
@@ -618,7 +569,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
           </section>
           ) : null}
 
-          {currentStep === 2 ? (
+          {currentStep === 1 ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
             <button
               type="button"
@@ -626,8 +577,14 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
               className="flex w-full items-center justify-between gap-3 text-left"
             >
               <div>
-                <h3 className="text-lg font-bold text-slate-900">Extras y comisión</h3>
-                <p className="text-sm text-slate-500">Opcional. Comisión, monitor y fuel.</p>
+                <h3 className="text-lg font-bold text-slate-900">
+                  {showOnlyCommissionInExtrasStep ? 'Comisión' : 'Extras y comisión'}
+                </h3>
+                <p className="text-sm text-slate-500">
+                  {showOnlyCommissionInExtrasStep
+                    ? 'Opcional. Solo porcentaje de comisión para brokers/agencias.'
+                    : 'Opcional. Comisión, monitor y fuel.'}
+                </p>
               </div>
               <span className="text-xs font-semibold text-slate-500">
                 {showExtras ? 'Ocultar' : 'Mostrar'}
@@ -660,7 +617,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
                 )}
               </div>
 
-              {!isEfoil ? (
+              {showInstructorInExtrasStep ? (
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -681,7 +638,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
                       placeholder="0"
                     />
                     <p className="text-xs text-gray-500 mt-1">
-                      Precio del monitor por día.
+                      Precio del monitor por día. Se mostrará con IVA cuando actives la opción inferior.
                     </p>
                   </div>
 
@@ -702,7 +659,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
                         Incluir IVA (+21%) en monitor
                       </span>
                       <span className="block text-xs text-gray-500 mt-1">
-                        El monitor se guardará con IVA incluido.
+                        El monitor se mostrará y se cobrará con IVA incluido.
                       </span>
                     </div>
                   </label>
@@ -719,28 +676,32 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
                 </div>
               ) : null}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Fuel / Combustible (€ / día)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={formData.fuel_price_per_day ?? ''}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      fuel_price_per_day: e.target.value === '' ? undefined : Number(e.target.value),
-                    })
-                  }
-                  className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
-                  placeholder="0"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Precio del combustible por día.
-                </p>
+              {supportsFuelFields ? (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Fuel / Combustible (€ / día)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.fuel_price_per_day ?? ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        fuel_price_per_day: e.target.value === '' ? undefined : Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-4 py-3 border border-gray-300 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-black"
+                    placeholder="0"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Precio del combustible por día. Este extra no lleva IVA.
+                  </p>
+                </div>
               </div>
+              ) : null}
             </div>
             ) : null}
           </section>
@@ -836,7 +797,7 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
                 {currentStep > 0 ? (
                   <button
                     type="button"
-                    onClick={() => setCurrentStep((prev) => Math.max(prev - 1, 0))}
+                    onClick={() => setStep(currentStep - 1)}
                     className="btn-outline w-full sm:w-auto"
                   >
                     Atras
@@ -844,7 +805,8 @@ export function ProductForm({ onClose, productToEdit, onSuccess, onDelete }: Pro
                 ) : null}
                 {isLastStep ? (
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => void handleSave()}
                     disabled={loading}
                     className="btn-primary disabled:opacity-50 w-full sm:w-auto"
                   >

@@ -5,7 +5,8 @@ import { Product } from '@/types';
 import { collection, onSnapshot, query, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { SEASONAL_PRICE_MONTHS, getProductBaseDailyPrice, getProductDailyPrice } from '@/lib/productPricing';
-import { getProductTypeLabel } from '@/lib/productTypes';
+import { supportsEfoilBatteryOption, supportsFuelOption, supportsInstructorOption } from '@/lib/bookingExtras';
+import { getProductTypeLabel, sortProductsByPriority } from '@/lib/productTypes';
 import { Edit, Eye, X } from 'lucide-react';
 import { ProductForm } from '@/components/products/ProductForm';
 
@@ -29,7 +30,7 @@ export default function ProductsPage() {
         id: doc.id,
         ...doc.data(),
       })) as Product[];
-      setProducts(productsData);
+      setProducts(sortProductsByPriority(productsData));
       setLoading(false);
     });
 
@@ -86,13 +87,15 @@ export default function ProductsPage() {
           const configuredMonths = getConfiguredMonths(product);
           const visibleMonths = configuredMonths.slice(0, 2);
           const displayPrice = getProductDailyPrice(product);
+          const showInstructor = supportsInstructorOption(product);
+          const showFuel = supportsFuelOption(product);
           const instructorPrice =
             Number(product.instructor_price_per_day || 0) *
             (product.instructor_incluir_iva ? 1.21 : 1);
           const fuelPrice = Number(product.fuel_price_per_day || 0);
           const extraSummary = [
-            instructorPrice > 0 ? `Monitor €${formatPrice(instructorPrice)}` : null,
-            fuelPrice > 0 ? `Fuel €${formatPrice(fuelPrice)}` : null,
+            showInstructor && instructorPrice > 0 ? `Monitor €${formatPrice(instructorPrice)}` : null,
+            showFuel && fuelPrice > 0 ? `Fuel €${formatPrice(fuelPrice)}` : null,
           ]
             .filter(Boolean)
             .join(' · ');
@@ -277,7 +280,7 @@ export default function ProductsPage() {
               <p className="text-sm leading-relaxed text-slate-600">
                 {viewingProduct.descripcion || 'Sin descripción.'}
               </p>
-              {viewingProduct.efoil_battery?.trim() ? (
+              {supportsEfoilBatteryOption(viewingProduct) && viewingProduct.efoil_battery?.trim() ? (
                 <p className="mt-3 text-sm text-slate-700">
                   <span className="font-semibold text-slate-800">Batería (efoil): </span>
                   {viewingProduct.efoil_battery.trim()}
@@ -300,30 +303,16 @@ export default function ProductsPage() {
                   {viewingProduct.precio_hora && viewingProduct.precio_hora > 0 ? (
                     <p className="mt-2 text-slate-600">Hora: €{formatPrice(viewingProduct.precio_hora)}</p>
                   ) : null}
-                  {(Number(viewingProduct.precio_temporada_baja || 0) > 0 ||
-                    Number(viewingProduct.precio_temporada_alta || 0) > 0) && (
-                    <ul className="mt-3 space-y-1 text-slate-600">
-                      {Number(viewingProduct.precio_temporada_baja || 0) > 0 ? (
-                        <li>
-                          Temporada baja (abr–jun, sep–oct): €
-                          {formatPrice(Number(viewingProduct.precio_temporada_baja))} / día base
-                        </li>
-                      ) : null}
-                      {Number(viewingProduct.precio_temporada_alta || 0) > 0 ? (
-                        <li>
-                          Temporada alta (jul–ago): €
-                          {formatPrice(Number(viewingProduct.precio_temporada_alta))} / día base
-                        </li>
-                      ) : null}
-                    </ul>
-                  )}
                 </div>
-                {(Number(viewingProduct.instructor_price_per_day || 0) > 0 ||
-                  Number(viewingProduct.fuel_price_per_day || 0) > 0) && (
+                {((supportsInstructorOption(viewingProduct) &&
+                  Number(viewingProduct.instructor_price_per_day || 0) > 0) ||
+                  (supportsFuelOption(viewingProduct) &&
+                    Number(viewingProduct.fuel_price_per_day || 0) > 0)) && (
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Extras</div>
                     <ul className="mt-2 list-inside list-disc space-y-1 text-slate-700">
-                      {Number(viewingProduct.instructor_price_per_day || 0) > 0 ? (
+                      {supportsInstructorOption(viewingProduct) &&
+                      Number(viewingProduct.instructor_price_per_day || 0) > 0 ? (
                         <li>
                           Monitor: €
                           {formatPrice(
@@ -334,7 +323,8 @@ export default function ProductsPage() {
                           {viewingProduct.instructor_incluir_iva ? ' (IVA incl.)' : ''}
                         </li>
                       ) : null}
-                      {Number(viewingProduct.fuel_price_per_day || 0) > 0 ? (
+                      {supportsFuelOption(viewingProduct) &&
+                      Number(viewingProduct.fuel_price_per_day || 0) > 0 ? (
                         <li>Fuel: €{formatPrice(Number(viewingProduct.fuel_price_per_day || 0))} / día</li>
                       ) : null}
                     </ul>

@@ -10,6 +10,7 @@ import { BOOKING_FORM_MODAL_OPEN_KEY, clearBookingDraftStorage } from '@/lib/boo
 import { useAuthStore } from '@/store/authStore';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { useSearchParams } from 'next/navigation';
+import { getBookingDeliveryFee, getDeliveryLocationLabel } from '@/lib/deliveryLocations';
 import {
   Plus,
   Search,
@@ -362,22 +363,8 @@ export default function BrokerReservasPage() {
   const formatMoney = (n: number) =>
     n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 });
 
-  const ubicacionLabel = (booking: Booking) => {
-    switch (booking.ubicacion_entrega) {
-      case 'marina_ibiza':
-        return 'Marina Ibiza';
-      case 'marina_botafoch':
-        return 'Marina Botafoch';
-      case 'club_nautico':
-        return 'Club Náutico Ibiza';
-      case 'otro':
-        return booking.ubicacion_entrega_detalle?.trim() || 'Otro';
-      default:
-        return typeof booking.ubicacion_entrega === 'string' && booking.ubicacion_entrega
-          ? booking.ubicacion_entrega
-          : '';
-    }
-  };
+  const ubicacionLabel = (booking: Booking) =>
+    getDeliveryLocationLabel(booking.ubicacion_entrega, booking.ubicacion_entrega_detalle);
 
   const bookingGroups = useMemo(() => {
     const map = new Map<string, Booking[]>();
@@ -539,7 +526,7 @@ export default function BrokerReservasPage() {
                       booking.estado !== 'cancelada' &&
                       booking.estado !== 'expirada';
                     const isCharging = chargingBookingId === booking.id;
-                    const canCancel = booking.estado !== 'cancelada' && booking.estado !== 'expirada';
+                    const canCancel = booking.estado !== 'cancelada';
                     const menuOpen = openActionMenuId === booking.id;
 
                     return (
@@ -790,11 +777,7 @@ export default function BrokerReservasPage() {
                 <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Detalles de Entrega</label>
                 <div className="bg-slate-50 rounded-lg p-4 space-y-2 text-slate-800">
                   <p className="text-sm"><span className="font-semibold text-slate-700">Ubicación:</span> {
-                    viewingBooking.ubicacion_entrega === 'marina_ibiza' ? 'Marina Ibiza' :
-                    viewingBooking.ubicacion_entrega === 'marina_botafoch' ? 'Marina Botafoch' :
-                    viewingBooking.ubicacion_entrega === 'club_nautico' ? 'Club Náutico Ibiza' :
-                    viewingBooking.ubicacion_entrega === 'otro' ? (viewingBooking.ubicacion_entrega_detalle || 'Otro') :
-                    viewingBooking.ubicacion_entrega || 'No especificado'
+                    getDeliveryLocationLabel(viewingBooking.ubicacion_entrega, viewingBooking.ubicacion_entrega_detalle) || 'No especificado'
                   }</p>
                   {viewingBooking.nombre_barco && (
                     <p className="text-sm"><span className="font-semibold text-slate-700">Barco:</span> {viewingBooking.nombre_barco}</p>
@@ -818,6 +801,9 @@ export default function BrokerReservasPage() {
                     )}
                     {Number(viewingBooking.fuel_total || 0) > 0 && (
                       <div>Fuel: €{Number(viewingBooking.fuel_total || 0).toFixed(2)}</div>
+                    )}
+                    {getBookingDeliveryFee(viewingBooking) > 0 && (
+                      <div>Entrega: €{getBookingDeliveryFee(viewingBooking).toFixed(2)}</div>
                     )}
                   </div>
                   <p className="text-2xl font-bold text-slate-900 flex items-center gap-1">
@@ -849,7 +835,7 @@ export default function BrokerReservasPage() {
                   <Share2 className="h-4 w-4" />
                   Copiar enlace contrato
                 </button>
-                {viewingBooking.estado !== 'cancelada' && viewingBooking.estado !== 'expirada' ? (
+                {viewingBooking.estado !== 'cancelada' ? (
                   <button
                     type="button"
                     onClick={() => handleCancelBooking(viewingBooking)}

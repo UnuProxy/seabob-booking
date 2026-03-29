@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react';
 import {
   collection,
   doc,
@@ -15,6 +15,8 @@ import {
 import { db } from '@/lib/firebase/config';
 import { Booking, BookingItem, Product } from '@/types';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
+import { getBookingClientTotals } from '@/lib/bookingClientPricing';
+import { getBookingDeliveryFee, getDeliveryLocationLabel } from '@/lib/deliveryLocations';
 import { useParams, useSearchParams } from 'next/navigation';
 import {
   Anchor,
@@ -365,13 +367,6 @@ const CONTRACT_COPY = {
 type Language = 'es' | 'en';
 type SignaturePointerEvent = ReactMouseEvent<HTMLCanvasElement> | ReactTouchEvent<HTMLCanvasElement>;
 
-const LOCATION_LABELS = {
-  marina_ibiza: { es: 'Marina Ibiza', en: 'Marina Ibiza' },
-  marina_botafoch: { es: 'Marina Botafoch', en: 'Marina Botafoch' },
-  club_nautico: { es: 'Club Náutico Ibiza', en: 'Club Náutico Ibiza' },
-  otro: { es: 'Otro', en: 'Other' },
-} as const;
-
 export default function ContractPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -401,7 +396,6 @@ export default function ContractPage() {
   const [paymentLinkError, setPaymentLinkError] = useState<string | null>(null);
   const getErrorMessage = (error: unknown) =>
     typeof error === 'object' && error && 'message' in error ? String((error as { message?: unknown }).message || '') : '';
-  const totalToPay = booking ? booking.precio_total : 0;
   const requiresPayment = booking?.requires_payment !== false;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -604,8 +598,7 @@ export default function ContractPage() {
   const getLocationLabel = (booking?: Booking | null) => {
     const value = booking?.ubicacion_entrega;
     if (!value) return copy.labels.notProvided;
-    if (value === 'otro') return booking?.ubicacion_entrega_detalle || LOCATION_LABELS.otro?.[lang] || value;
-    return LOCATION_LABELS[value]?.[lang] || value;
+    return getDeliveryLocationLabel(value, booking?.ubicacion_entrega_detalle);
   };
 
   const getPageErrorMessage = () => {
@@ -629,6 +622,27 @@ export default function ContractPage() {
   const rentalDays = booking
     ? Math.max(1, differenceInDays(new Date(booking.fecha_fin), new Date(booking.fecha_inicio)))
     : 1;
+  const clientTotals = useMemo(() => {
+    if (!booking) {
+      return { rentalTotal: 0, instructorTotal: 0, fuelTotal: 0, deliveryTotal: 0, total: 0 };
+    }
+
+    const computed = getBookingClientTotals(
+      booking.items || [],
+      (productId) => productMap[productId],
+      booking.fecha_inicio,
+      booking.fecha_fin
+    );
+
+    return {
+      rentalTotal: computed.rentalTotal || Number(booking.precio_alquiler || booking.precio_total || 0),
+      instructorTotal: computed.instructorTotal || Number(booking.instructor_total || 0),
+      fuelTotal: computed.fuelTotal || Number(booking.fuel_total || 0),
+      deliveryTotal: getBookingDeliveryFee(booking),
+      total: (computed.total || Number(booking.precio_total || 0)) + getBookingDeliveryFee(booking),
+    };
+  }, [booking, productMap]);
+  const totalToPay = clientTotals.total;
 
   const getCoordinates = (e: SignaturePointerEvent, canvas: HTMLCanvasElement) => {
     const rect = canvas.getBoundingClientRect();
@@ -967,14 +981,14 @@ export default function ContractPage() {
                 <div className="flex justify-between items-center text-gray-700">
                   <span>{copy.labels.rentalTotal}</span>
                   <span>
-                    €{Number(booking.precio_alquiler || booking.precio_total || 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                    €{clientTotals.rentalTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                   </span>
                 </div>
                 {Number(booking.instructor_total || 0) > 0 && (
                   <div className="flex justify-between items-center text-gray-700">
                     <span>{lang === 'es' ? 'Monitor' : 'Instructor'}</span>
                     <span>
-                      €{Number(booking.instructor_total || 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                      €{clientTotals.instructorTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 )}
@@ -982,7 +996,15 @@ export default function ContractPage() {
                   <div className="flex justify-between items-center text-gray-700">
                     <span>{lang === 'es' ? 'Fuel' : 'Fuel'}</span>
                     <span>
-                      €{Number(booking.fuel_total || 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                      €{clientTotals.fuelTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                )}
+                {clientTotals.deliveryTotal > 0 && (
+                  <div className="flex justify-between items-center text-gray-700">
+                    <span>{lang === 'es' ? 'Entrega' : 'Delivery'}</span>
+                    <span>
+                      €{clientTotals.deliveryTotal.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                     </span>
                   </div>
                 )}
@@ -992,6 +1014,9 @@ export default function ContractPage() {
                 <span className="font-bold text-xl text-gray-900">
                   €{totalToPay.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                 </span>
+              </div>
+              <div className="text-xs text-emerald-700 font-medium">
+                {lang === 'es' ? 'Importe final con IVA incluido.' : 'Final amount includes VAT.'}
               </div>
               {booking.nautical_license_required && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">

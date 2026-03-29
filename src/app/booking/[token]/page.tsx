@@ -16,6 +16,13 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { getProductDailyPrice, getProductVatShortLabel } from '@/lib/productPricing';
+import { getTimedBookingExpiration } from '@/lib/bookingExpiration';
+import { getBookingClientTotals } from '@/lib/bookingClientPricing';
+import {
+  DELIVERY_LOCATION_GROUPS,
+  getDeliveryLocationFee,
+  isDeliveryLocation,
+} from '@/lib/deliveryLocations';
 import {
   getBookingItemAverageDailyPrice,
   getBookingItemRentalTotal,
@@ -25,6 +32,7 @@ import {
   getBookingItemInstructorTotal,
   hasFuelOption,
   hasInstructorOption,
+  supportsEfoilBatteryOption,
 } from '@/lib/bookingExtras';
 import { BookingItem, BookingLink, Product, User as AppUser } from '@/types';
 import { addDays, format, eachDayOfInterval } from 'date-fns';
@@ -82,7 +90,13 @@ export default function PublicBookingPage() {
   const [isMultiDay, setIsMultiDay] = useState(false);
 
   const [deliveryLocation, setDeliveryLocation] = useState<
-    'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro'
+    | 'marina_ibiza'
+    | 'marina_botafoch'
+    | 'club_nautico'
+    | 'marina_port_ibiza'
+    | 'marina_santa_eulalia'
+    | 'club_nautic_san_antonio'
+    | 'otro'
   >('marina_ibiza');
   const [deliveryTime, setDeliveryTime] = useState('10:00');
   const [boatName, setBoatName] = useState('');
@@ -246,6 +260,20 @@ export default function PublicBookingPage() {
   );
 
   const total = rentalTotal + instructorTotal + fuelTotal;
+  const productsById = useMemo(
+    () =>
+      Object.fromEntries(
+        products
+          .filter((product): product is Product & { id: string } => Boolean(product.id))
+          .map((product) => [product.id, product])
+      ),
+    [products]
+  );
+  const clientTotals = useMemo(
+    () => getBookingClientTotals(items, (productId) => productsById[productId], startDate, endDate),
+    [endDate, items, productsById, startDate]
+  );
+  const deliveryTotal = useMemo(() => getDeliveryLocationFee(deliveryLocation), [deliveryLocation]);
   const nauticalLicenseRequired = useMemo(
     () =>
       items.some((item) => {
@@ -431,8 +459,11 @@ export default function PublicBookingPage() {
           }, 0)
         : 0;
 
-      // Calculate reservation expiration time (hold period) - 30 minutes
-      const expiracion = new Date(Date.now() + 30 * 60 * 1000);
+      // Broker/agency-created links keep the booking lock for 30m if service is within 24h,
+      // otherwise for 24h. Other links keep the default short hold.
+      const expiracion = getTimedBookingExpiration(startDate, resolvedCreatorUser?.rol ?? null);
+
+      const bookingTotal = clientTotals.total + deliveryTotal;
 
       const bookingData = {
         numero_reserva: ref,
@@ -445,10 +476,11 @@ export default function PublicBookingPage() {
         items: itemsWithNames,
         fecha_inicio: startDate,
         fecha_fin: endDate,
-        precio_total: total,
-        precio_alquiler: rentalTotal,
-        instructor_total: instructorTotal,
-        fuel_total: fuelTotal,
+        precio_total: bookingTotal,
+        precio_alquiler: clientTotals.rentalTotal,
+        instructor_total: clientTotals.instructorTotal,
+        fuel_total: clientTotals.fuelTotal,
+        delivery_total: deliveryTotal,
         nautical_license_required: nauticalLicenseRequired,
         deposito_total: 0,
         estado: 'pendiente',
@@ -614,7 +646,7 @@ export default function PublicBookingPage() {
             },
             body: JSON.stringify({
               bookingId,
-              amount: total,
+              amount: bookingTotal,
               currency: 'eur',
               clientEmail: clientEmail.trim(),
               clientName: clientName.trim(),
@@ -947,7 +979,7 @@ export default function PublicBookingPage() {
                                   <div>
                                     <div className="font-semibold text-slate-900">Añadir fuel/combustible</div>
                                     <div className="text-xs text-slate-500">
-                                      €{formatPrice(Number(product.fuel_price_per_day || 0))}/día por unidad
+                                      €{formatPrice(Number(product.fuel_price_per_day || 0))}/día por unidad (sin IVA)
                                       {qty > 0 && fuelPreview > 0 ? ` · Total €${formatPrice(fuelPreview)}` : ''}
                                     </div>
                                   </div>
@@ -956,6 +988,12 @@ export default function PublicBookingPage() {
                             )}
                           </div>
                         )}
+
+                        {supportsEfoilBatteryOption(product) && product.efoil_battery?.trim() ? (
+                          <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-600">
+                            Batería / autonomía: {product.efoil_battery.trim()}
+                          </div>
+                        ) : null}
 
                         {requiresLicense && (
                           <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
@@ -987,17 +1025,40 @@ export default function PublicBookingPage() {
                   </span>
                   <select
                     value={deliveryLocation}
-                    onChange={(e) =>
-                      setDeliveryLocation(e.target.value as 'marina_ibiza' | 'marina_botafoch' | 'club_nautico' | 'otro')
-                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (isDeliveryLocation(value)) {
+                        setDeliveryLocation(value);
+                      }
+                    }}
                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
                   >
-                    <option value="marina_ibiza">Marina Ibiza</option>
-                    <option value="marina_botafoch">Marina Botafoch</option>
-                    <option value="club_nautico">Club Náutico Ibiza</option>
-                    <option value="otro">Otro</option>
+                    {DELIVERY_LOCATION_GROUPS.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map((option) => (
+                          <option key={option} value={option}>
+                            {option === 'club_nautico'
+                              ? 'Club Náutico Ibiza'
+                              : option === 'marina_ibiza'
+                                ? 'Marina Ibiza'
+                                : option === 'marina_botafoch'
+                                  ? 'Marina Botafoch'
+                                  : option === 'marina_port_ibiza'
+                                    ? 'Marina Port Ibiza (Old Town)'
+                                    : option === 'marina_santa_eulalia'
+                                      ? 'Marina Santa Eulalia'
+                                      : 'Club Nautic San Antonio'}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
                   </select>
                 </label>
+                {deliveryTotal > 0 ? (
+                  <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+                    Suplemento de entrega: €{formatPrice(deliveryTotal)}
+                  </div>
+                ) : null}
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
                     <Anchor size={18} /> Hora de entrega
@@ -1106,20 +1167,23 @@ export default function PublicBookingPage() {
 
             <section className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
               <div>
-                <p className="text-sm text-slate-500">Total estimado</p>
+                <p className="text-sm text-slate-500">Total a pagar</p>
                 <div className="text-3xl font-bold text-slate-900">
-                  €{formatPrice(total)}
+                  €{formatPrice(clientTotals.total + deliveryTotal)}
                 </div>
                 <div className="text-xs text-slate-500 mt-2 space-y-1">
-                  <div>Alquiler: €{formatPrice(rentalTotal)}</div>
-                  {instructorTotal > 0 && <div>Monitor: €{formatPrice(instructorTotal)}</div>}
-                  {fuelTotal > 0 && <div>Fuel: €{formatPrice(fuelTotal)}</div>}
+                  <div>Alquiler: €{formatPrice(clientTotals.rentalTotal)}</div>
+                  {clientTotals.instructorTotal > 0 && <div>Monitor: €{formatPrice(clientTotals.instructorTotal)}</div>}
+                  {clientTotals.fuelTotal > 0 && <div>Fuel: €{formatPrice(clientTotals.fuelTotal)}</div>}
+                  {deliveryTotal > 0 && <div>Entrega: €{formatPrice(deliveryTotal)}</div>}
                 </div>
-                {vatSummaryLabel ? (
-                  <p className="text-xs font-medium uppercase tracking-[0.08em] text-amber-700 mt-2">
-                    {vatSummaryLabel}
-                  </p>
-                ) : null}
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-emerald-700 mt-2">
+                  IVA aplicado donde corresponde
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Monitor con IVA si esta configurado asi. Fuel sin IVA.
+                </p>
+                {vatSummaryLabel ? <p className="text-xs text-slate-500 mt-1">{vatSummaryLabel}</p> : null}
                 {nauticalLicenseRequired ? (
                   <p className="text-xs text-amber-700 mt-2">
                     Si reservas sin monitor, la licencia náutica del cliente será necesaria, pero no hace falta subirla ahora.
