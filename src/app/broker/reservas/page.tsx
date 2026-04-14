@@ -22,7 +22,6 @@ import {
   Share2,
   Euro,
   Loader2,
-  Ban,
   Calendar,
   CreditCard,
   MoreHorizontal,
@@ -252,24 +251,6 @@ export default function BrokerReservasPage() {
       alert('Error al generar el enlace de pago');
     } finally {
       setChargingBookingId(null);
-    }
-  };
-
-  const handleCancelBooking = async (booking: Booking) => {
-    if (!confirm(`¿Estás seguro de que deseas cancelar la reserva ${booking.numero_reserva}?\n\nEsto cambiará el estado a "cancelada" pero mantendrá el registro.`)) {
-      return;
-    }
-
-    try {
-      await releaseBookingStockOnce(booking.id, user?.id || 'broker_panel');
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        estado: 'cancelada',
-        updated_at: serverTimestamp()
-      });
-      alert('Reserva cancelada correctamente');
-    } catch (error) {
-      console.error('Error canceling booking:', error);
-      alert('Error al cancelar la reserva');
     }
   };
 
@@ -526,7 +507,6 @@ export default function BrokerReservasPage() {
                       booking.estado !== 'cancelada' &&
                       booking.estado !== 'expirada';
                     const isCharging = chargingBookingId === booking.id;
-                    const canCancel = booking.estado !== 'cancelada';
                     const menuOpen = openActionMenuId === booking.id;
 
                     return (
@@ -668,20 +648,6 @@ export default function BrokerReservasPage() {
                                     <Share2 className="h-4 w-4 opacity-70" />
                                     Copiar enlace
                                   </button>
-                                  {canCancel ? (
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        void handleCancelBooking(booking);
-                                      }}
-                                    >
-                                      <Ban className="h-4 w-4 opacity-80" />
-                                      Cancelar reserva
-                                    </button>
-                                  ) : null}
                                 </div>
                               ) : null}
                             </div>
@@ -835,16 +801,6 @@ export default function BrokerReservasPage() {
                   <Share2 className="h-4 w-4" />
                   Copiar enlace contrato
                 </button>
-                {viewingBooking.estado !== 'cancelada' ? (
-                  <button
-                    type="button"
-                    onClick={() => handleCancelBooking(viewingBooking)}
-                    className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-800 hover:bg-rose-100"
-                  >
-                    <Ban className="h-4 w-4" />
-                    Cancelar reserva
-                  </button>
-                ) : null}
               </div>
 
               <NauticalLicenseManager booking={viewingBooking} />

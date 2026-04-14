@@ -76,74 +76,153 @@ function AdminBookingActionsMenu({
         <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
       </button>
       {isOpen ? (
-        <div
-          className="absolute right-0 top-full z-40 mt-1 w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80"
-          role="menu"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <>
           <button
             type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-            onClick={() => {
-              onClose();
-              onViewDetails();
-            }}
+            aria-label="Cerrar menu de acciones"
+            className="fixed inset-0 z-40 bg-slate-900/20 md:hidden"
+            onClick={onClose}
+          />
+          <div
+            className="fixed inset-x-4 bottom-4 z-50 rounded-2xl bg-white py-2 shadow-2xl ring-1 ring-slate-200/80 md:hidden"
+            role="menu"
+            onClick={(e) => e.stopPropagation()}
           >
-            <Eye className="h-4 w-4 opacity-70" />
-            Ver detalles
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-            onClick={() => {
-              onClose();
-              onPayment();
-            }}
-          >
-            <CreditCard className="h-4 w-4 opacity-70" />
-            {booking.pago_realizado ? 'Gestionar pago' : 'Cobrar'}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-            onClick={() => {
-              onClose();
-              onOpenContract();
-            }}
-          >
-            <Link2 className="h-4 w-4 opacity-70" />
-            Abrir contrato
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-            onClick={() => {
-              onClose();
-              onCopyContract();
-            }}
-          >
-            <Share2 className="h-4 w-4 opacity-70" />
-            Copiar enlace
-          </button>
-          {canCancel ? (
+            <div className="px-4 pb-2 pt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Acciones
+            </div>
             <button
               type="button"
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
               onClick={() => {
                 onClose();
-                onCancel();
+                onViewDetails();
               }}
             >
-              <Ban className="h-4 w-4 opacity-80" />
-              Cancelar reserva
+              <Eye className="h-4 w-4 opacity-70" />
+              Ver detalles
             </button>
-          ) : null}
-        </div>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onPayment();
+              }}
+            >
+              <CreditCard className="h-4 w-4 opacity-70" />
+              {booking.pago_realizado ? 'Gestionar pago' : 'Cobrar'}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onOpenContract();
+              }}
+            >
+              <Link2 className="h-4 w-4 opacity-70" />
+              Abrir contrato
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onCopyContract();
+              }}
+            >
+              <Share2 className="h-4 w-4 opacity-70" />
+              Copiar enlace
+            </button>
+            {canCancel ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-rose-700 hover:bg-rose-50"
+                onClick={() => {
+                  onClose();
+                  onCancel();
+                }}
+              >
+                <Ban className="h-4 w-4 opacity-80" />
+                Cancelar reserva
+              </button>
+            ) : null}
+          </div>
+          <div
+            className="absolute right-0 top-full z-40 mt-1 hidden w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80 md:block"
+            role="menu"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onViewDetails();
+              }}
+            >
+              <Eye className="h-4 w-4 opacity-70" />
+              Ver detalles
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onPayment();
+              }}
+            >
+              <CreditCard className="h-4 w-4 opacity-70" />
+              {booking.pago_realizado ? 'Gestionar pago' : 'Cobrar'}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onOpenContract();
+              }}
+            >
+              <Link2 className="h-4 w-4 opacity-70" />
+              Abrir contrato
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onCopyContract();
+              }}
+            >
+              <Share2 className="h-4 w-4 opacity-70" />
+              Copiar enlace
+            </button>
+            {canCancel ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50"
+                onClick={() => {
+                  onClose();
+                  onCancel();
+                }}
+              >
+                <Ban className="h-4 w-4 opacity-80" />
+                Cancelar reserva
+              </button>
+            ) : null}
+          </div>
+        </>
       ) : null}
     </div>
   );
@@ -972,7 +1051,7 @@ export default function BookingsPage() {
       </div>
 
       {/* Bookings List */}
-      <div className="overflow-hidden rounded-xl bg-white ring-1 ring-slate-200/70">
+      <div className="overflow-visible rounded-xl bg-white ring-1 ring-slate-200/70">
         {filteredBookings.length > 0 ? (
           <>
             {/* Mobile Cards */}
