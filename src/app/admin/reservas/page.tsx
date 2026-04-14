@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
@@ -61,8 +61,46 @@ function AdminBookingActionsMenu({
   onCancel: () => void;
 }) {
   const canCancel = booking.estado !== 'cancelada';
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const desktopMenuRef = useRef<HTMLDivElement | null>(null);
+  const [openUpward, setOpenUpward] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setOpenUpward(false);
+      return;
+    }
+
+    const updatePosition = () => {
+      if (window.innerWidth < 768) {
+        setOpenUpward(false);
+        return;
+      }
+
+      const root = rootRef.current;
+      const menu = desktopMenuRef.current;
+      if (!root || !menu) return;
+
+      const triggerRect = root.getBoundingClientRect();
+      const menuHeight = menu.offsetHeight;
+      const spaceBelow = window.innerHeight - triggerRect.bottom;
+      const spaceAbove = triggerRect.top;
+
+      setOpenUpward(spaceBelow < menuHeight + 12 && spaceAbove > spaceBelow);
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [isOpen]);
+
   return (
-    <div className="relative shrink-0">
+    <div ref={rootRef} className="relative shrink-0">
       <button
         type="button"
         className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
@@ -155,7 +193,11 @@ function AdminBookingActionsMenu({
             ) : null}
           </div>
           <div
-            className="absolute right-0 top-full z-40 mt-1 hidden w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80 md:block"
+            ref={desktopMenuRef}
+            className={clsx(
+              'absolute right-0 z-40 hidden w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80 md:block',
+              openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
+            )}
             role="menu"
             onClick={(e) => e.stopPropagation()}
           >

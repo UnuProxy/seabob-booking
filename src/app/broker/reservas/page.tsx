@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product } from '@/types';
@@ -45,6 +45,147 @@ function getDate(dateValue: unknown): Date {
   if (typeof dateValue === 'string') return new Date(dateValue);
   if (typeof dateValue === 'number') return new Date(dateValue);
   return new Date();
+}
+
+function BrokerBookingActionsMenu({
+  isOpen,
+  onToggle,
+  onClose,
+  canCharge,
+  isCharging,
+  onViewDetails,
+  onCharge,
+  onOpenContract,
+  onCopyContract,
+}: {
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  canCharge: boolean;
+  isCharging: boolean;
+  onViewDetails: () => void;
+  onCharge: () => void;
+  onOpenContract: () => void;
+  onCopyContract: () => void;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [openUpward, setOpenUpward] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setOpenUpward(false);
+      return;
+    }
+
+    const updatePosition = () => {
+      const root = rootRef.current;
+      const menu = menuRef.current;
+      if (!root || !menu) return;
+
+      const triggerRect = root.getBoundingClientRect();
+      const menuHeight = menu.offsetHeight;
+      const spaceBelow = window.innerHeight - triggerRect.bottom;
+      const spaceAbove = triggerRect.top;
+
+      setOpenUpward(spaceBelow < menuHeight + 12 && spaceAbove > spaceBelow);
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [isOpen]);
+
+  return (
+    <div ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+        aria-label="Acciones"
+        aria-expanded={isOpen}
+      >
+        <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
+      </button>
+      {isOpen ? (
+        <div
+          ref={menuRef}
+          className={clsx(
+            'absolute right-0 z-30 w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80',
+            openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
+          )}
+          onClick={(e) => e.stopPropagation()}
+          role="menu"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              onClose();
+              onViewDetails();
+            }}
+          >
+            <Eye className="h-4 w-4 opacity-70" />
+            Ver detalles
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canCharge || isCharging}
+            className={clsx(
+              'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+              canCharge && !isCharging ? 'text-slate-700 hover:bg-slate-50' : 'cursor-not-allowed text-slate-400'
+            )}
+            onClick={() => {
+              if (!canCharge || isCharging) return;
+              onClose();
+              onCharge();
+            }}
+          >
+            {isCharging ? (
+              <Loader2 className="h-4 w-4 animate-spin opacity-70" />
+            ) : (
+              <CreditCard className="h-4 w-4 opacity-70" />
+            )}
+            Cobrar
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              onClose();
+              onOpenContract();
+            }}
+          >
+            <Link2 className="h-4 w-4 opacity-70" />
+            Abrir contrato
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              onClose();
+              onCopyContract();
+            }}
+          >
+            <Share2 className="h-4 w-4 opacity-70" />
+            Copiar enlace
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function BrokerReservasPage() {
@@ -471,7 +612,7 @@ export default function BrokerReservasPage() {
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-xl bg-white ring-1 ring-slate-200/70">
+      <div className="overflow-visible rounded-xl bg-white ring-1 ring-slate-200/70">
         {filteredBookings.length === 0 ? (
           <div className="px-6 py-14 text-center text-sm text-slate-500">
             {bookings.length === 0
@@ -570,87 +711,17 @@ export default function BrokerReservasPage() {
                               </p>
                             </div>
 
-                            <div className="relative shrink-0">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenActionMenuId((id) => (id === booking.id ? null : booking.id));
-                                }}
-                                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-                                aria-label="Acciones"
-                                aria-expanded={menuOpen}
-                              >
-                                <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
-                              </button>
-                              {menuOpen ? (
-                                <div
-                                  className="absolute right-0 top-full z-30 mt-1 w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80"
-                                  onClick={(e) => e.stopPropagation()}
-                                  role="menu"
-                                >
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                                    onClick={() => {
-                                      setOpenActionMenuId(null);
-                                      setViewingBookingId(booking.id);
-                                    }}
-                                  >
-                                    <Eye className="h-4 w-4 opacity-70" />
-                                    Ver detalles
-                                  </button>
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    disabled={!canCharge || isCharging}
-                                    className={clsx(
-                                      'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
-                                      canCharge && !isCharging
-                                        ? 'text-slate-700 hover:bg-slate-50'
-                                        : 'cursor-not-allowed text-slate-400'
-                                    )}
-                                    onClick={() => {
-                                      if (!canCharge || isCharging) return;
-                                      setOpenActionMenuId(null);
-                                      void openOrCreatePayment(booking);
-                                    }}
-                                  >
-                                    {isCharging ? (
-                                      <Loader2 className="h-4 w-4 animate-spin opacity-70" />
-                                    ) : (
-                                      <CreditCard className="h-4 w-4 opacity-70" />
-                                    )}
-                                    Cobrar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                                    onClick={() => {
-                                      setOpenActionMenuId(null);
-                                      openContractTab(booking);
-                                    }}
-                                  >
-                                    <Link2 className="h-4 w-4 opacity-70" />
-                                    Abrir contrato
-                                  </button>
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                                    onClick={() => {
-                                      setOpenActionMenuId(null);
-                                      copyContractLink(booking);
-                                    }}
-                                  >
-                                    <Share2 className="h-4 w-4 opacity-70" />
-                                    Copiar enlace
-                                  </button>
-                                </div>
-                              ) : null}
-                            </div>
+                            <BrokerBookingActionsMenu
+                              isOpen={menuOpen}
+                              onToggle={() => setOpenActionMenuId((id) => (id === booking.id ? null : booking.id))}
+                              onClose={() => setOpenActionMenuId(null)}
+                              canCharge={canCharge}
+                              isCharging={isCharging}
+                              onViewDetails={() => setViewingBookingId(booking.id)}
+                              onCharge={() => void openOrCreatePayment(booking)}
+                              onOpenContract={() => openContractTab(booking)}
+                              onCopyContract={() => copyContractLink(booking)}
+                            />
                           </div>
                         </div>
                       </li>
