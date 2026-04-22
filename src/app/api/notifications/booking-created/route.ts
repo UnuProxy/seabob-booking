@@ -6,6 +6,7 @@ import type { Booking, User } from '@/types';
 export const runtime = 'nodejs';
 
 const RESEND_API_URL = 'https://api.resend.com/emails';
+const DEFAULT_NOTIFICATION_EMAIL = 'info@nautiqibiza.com';
 
 function parseRecipients(value?: string | null) {
   if (!value) return [];
@@ -44,6 +45,10 @@ async function resolveRecipients() {
   const configured = parseRecipients(process.env.ADMIN_BOOKING_NOTIFICATION_EMAILS);
   if (configured.length > 0) return configured;
 
+  if (DEFAULT_NOTIFICATION_EMAIL) {
+    return [DEFAULT_NOTIFICATION_EMAIL];
+  }
+
   const snapshot = await getAdminDb()
     .collection('users')
     .where('rol', '==', 'admin')
@@ -63,6 +68,9 @@ async function resolvePartnerName(booking: Booking) {
   const snapshot = await getAdminDb().collection('users').doc(partnerId).get();
   if (!snapshot.exists) return null;
   const user = snapshot.data() as User;
+  if (user.rol === 'broker' || user.rol === 'agency') {
+    return user.empresa_nombre || user.nombre || user.email || null;
+  }
   return user.nombre || user.email || null;
 }
 
@@ -70,7 +78,9 @@ export async function POST(request: NextRequest) {
   try {
     const resendApiKey = process.env.RESEND_API_KEY;
     const fromEmail =
-      process.env.BOOKING_NOTIFICATION_FROM_EMAIL || process.env.RESEND_FROM_EMAIL || '';
+      process.env.BOOKING_NOTIFICATION_FROM_EMAIL ||
+      process.env.RESEND_FROM_EMAIL ||
+      `Nautiq Ibiza <${DEFAULT_NOTIFICATION_EMAIL}>`;
 
     if (!resendApiKey || !fromEmail) {
       return NextResponse.json(
@@ -131,6 +141,14 @@ export async function POST(request: NextRequest) {
               ? 'colaborador'
               : 'panel';
 
+    const createdByLabel =
+      booking.broker_id
+        ? 'Broker'
+        : booking.agency_id
+          ? 'Agencia'
+          : booking.colaborador_id
+            ? 'Colaborador'
+            : 'Equipo';
     const subject = `Nueva reserva ${booking.numero_reserva}`;
     const html = `
       <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #0f172a;">
@@ -143,7 +161,7 @@ export async function POST(request: NextRequest) {
           <li><strong>Fecha de servicio:</strong> ${getServiceDateLabel(booking.fecha_inicio)}</li>
           <li><strong>Total:</strong> €${Number(booking.precio_total || 0).toFixed(2)}</li>
           <li><strong>Origen:</strong> ${sourceLabel}</li>
-          ${partnerName ? `<li><strong>Creada por:</strong> ${partnerName}</li>` : ''}
+          ${partnerName ? `<li><strong>${createdByLabel}:</strong> ${partnerName}</li>` : ''}
         </ul>
         <p style="margin-top: 20px;">
           <a
@@ -164,7 +182,7 @@ export async function POST(request: NextRequest) {
       `Fecha de servicio: ${getServiceDateLabel(booking.fecha_inicio)}`,
       `Total: €${Number(booking.precio_total || 0).toFixed(2)}`,
       `Origen: ${sourceLabel}`,
-      partnerName ? `Creada por: ${partnerName}` : null,
+      partnerName ? `${createdByLabel}: ${partnerName}` : null,
       '',
       `Abrir en admin: ${adminLink}`,
     ]
