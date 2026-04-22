@@ -666,6 +666,18 @@ export default function PublicBookingPage() {
       }
 
       const contractUrl = `${window.location.origin}/contract/${bookingId}?t=${contractToken}`;
+      void fetch('/api/notifications/booking-created', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bookingId,
+          token: contractToken,
+        }),
+      }).catch((notificationError) => {
+        console.error('Error sending booking notification:', notificationError);
+      });
       setSuccess({ contractUrl, paymentUrl, requiresPayment });
     } catch (err) {
       console.error(err);

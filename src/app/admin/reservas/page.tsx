@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product, User } from '@/types';
@@ -8,6 +8,8 @@ import { BookingForm } from '@/components/bookings/BookingForm';
 import { NauticalLicenseManager } from '@/components/bookings/NauticalLicenseManager';
 import { PaymentRefundManager } from '@/components/bookings/PaymentRefundManager';
 import { BOOKING_FORM_MODAL_OPEN_KEY, clearBookingDraftStorage } from '@/lib/bookingDraft';
+import { ensureBookingAccessToken, getAdminContractPath, getPublicContractUrl } from '@/lib/bookingAccess';
+import { shouldAutoExpireBooking } from '@/lib/bookingExpiration';
 import { useAuthStore } from '@/store/authStore';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { getBookingDeliveryFee, getDeliveryLocationLabel } from '@/lib/deliveryLocations';
@@ -34,10 +36,25 @@ import {
   Link2,
   Filter,
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { addWeeks, endOfWeek, format, parseISO, startOfWeek, subWeeks } from 'date-fns';
 import { es } from 'date-fns/locale';
 import clsx from 'clsx';
 import { useSearchParams } from 'next/navigation';
+
+const WEEK_OPTIONS = { weekStartsOn: 1 as const };
+
+const resolveWeekStart = (value?: string) => {
+  if (!value) {
+    return startOfWeek(new Date(), WEEK_OPTIONS);
+  }
+
+  const parsed = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return startOfWeek(new Date(), WEEK_OPTIONS);
+  }
+
+  return startOfWeek(parsed, WEEK_OPTIONS);
+};
 
 function AdminBookingActionsMenu({
   booking,
@@ -61,8 +78,46 @@ function AdminBookingActionsMenu({
   onCancel: () => void;
 }) {
   const canCancel = booking.estado !== 'cancelada';
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const desktopMenuRef = useRef<HTMLDivElement | null>(null);
+  const [openUpward, setOpenUpward] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setOpenUpward(false);
+      return;
+    }
+
+    const updatePosition = () => {
+      if (window.innerWidth < 768) {
+        setOpenUpward(false);
+        return;
+      }
+
+      const root = rootRef.current;
+      const menu = desktopMenuRef.current;
+      if (!root || !menu) return;
+
+      const triggerRect = root.getBoundingClientRect();
+      const menuHeight = menu.offsetHeight;
+      const spaceBelow = window.innerHeight - triggerRect.bottom;
+      const spaceAbove = triggerRect.top;
+
+      setOpenUpward(spaceBelow < menuHeight + 12 && spaceAbove > spaceBelow);
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [isOpen]);
+
   return (
-    <div className="relative shrink-0">
+    <div ref={rootRef} className="relative shrink-0">
       <button
         type="button"
         className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
@@ -76,74 +131,157 @@ function AdminBookingActionsMenu({
         <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
       </button>
       {isOpen ? (
-        <div
-          className="absolute right-0 top-full z-40 mt-1 w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80"
-          role="menu"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <>
           <button
             type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-            onClick={() => {
-              onClose();
-              onViewDetails();
-            }}
+            aria-label="Cerrar menu de acciones"
+            className="fixed inset-0 z-40 bg-slate-900/20 md:hidden"
+            onClick={onClose}
+          />
+          <div
+            className="fixed inset-x-4 bottom-4 z-50 rounded-2xl bg-white py-2 shadow-2xl ring-1 ring-slate-200/80 md:hidden"
+            role="menu"
+            onClick={(e) => e.stopPropagation()}
           >
-            <Eye className="h-4 w-4 opacity-70" />
-            Ver detalles
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-            onClick={() => {
-              onClose();
-              onPayment();
-            }}
-          >
-            <CreditCard className="h-4 w-4 opacity-70" />
-            {booking.pago_realizado ? 'Gestionar pago' : 'Cobrar'}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-            onClick={() => {
-              onClose();
-              onOpenContract();
-            }}
-          >
-            <Link2 className="h-4 w-4 opacity-70" />
-            Abrir contrato
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-            onClick={() => {
-              onClose();
-              onCopyContract();
-            }}
-          >
-            <Share2 className="h-4 w-4 opacity-70" />
-            Copiar enlace
-          </button>
-          {canCancel ? (
+            <div className="px-4 pb-2 pt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Acciones
+            </div>
             <button
               type="button"
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
               onClick={() => {
                 onClose();
-                onCancel();
+                onViewDetails();
               }}
             >
-              <Ban className="h-4 w-4 opacity-80" />
-              Cancelar reserva
+              <Eye className="h-4 w-4 opacity-70" />
+              Ver detalles
             </button>
-          ) : null}
-        </div>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onPayment();
+              }}
+            >
+              <CreditCard className="h-4 w-4 opacity-70" />
+              {booking.pago_realizado ? 'Gestionar pago' : 'Cobrar'}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onOpenContract();
+              }}
+            >
+              <Link2 className="h-4 w-4 opacity-70" />
+              Abrir contrato
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onCopyContract();
+              }}
+            >
+              <Share2 className="h-4 w-4 opacity-70" />
+              Copiar enlace
+            </button>
+            {canCancel ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-rose-700 hover:bg-rose-50"
+                onClick={() => {
+                  onClose();
+                  onCancel();
+                }}
+              >
+                <Ban className="h-4 w-4 opacity-80" />
+                Cancelar reserva
+              </button>
+            ) : null}
+          </div>
+          <div
+            ref={desktopMenuRef}
+            className={clsx(
+              'absolute right-0 z-40 hidden w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80 md:block',
+              openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
+            )}
+            role="menu"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onViewDetails();
+              }}
+            >
+              <Eye className="h-4 w-4 opacity-70" />
+              Ver detalles
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onPayment();
+              }}
+            >
+              <CreditCard className="h-4 w-4 opacity-70" />
+              {booking.pago_realizado ? 'Gestionar pago' : 'Cobrar'}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onOpenContract();
+              }}
+            >
+              <Link2 className="h-4 w-4 opacity-70" />
+              Abrir contrato
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+              onClick={() => {
+                onClose();
+                onCopyContract();
+              }}
+            >
+              <Share2 className="h-4 w-4 opacity-70" />
+              Copiar enlace
+            </button>
+            {canCancel ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50"
+                onClick={() => {
+                  onClose();
+                  onCancel();
+                }}
+              >
+                <Ban className="h-4 w-4 opacity-80" />
+                Cancelar reserva
+              </button>
+            ) : null}
+          </div>
+        </>
       ) : null}
     </div>
   );
@@ -164,9 +302,10 @@ export default function BookingsPage() {
   const [searchTerm, setSearchTerm] = useState(initialBookingRef);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'unpaid' | 'refunded'>('all');
-  const [timeFilter, setTimeFilter] = useState<'today' | 'upcoming' | 'all'>(
-    hasInitialDeepLink ? 'all' : 'today'
+  const [timeFilter, setTimeFilter] = useState<'selectedWeek' | 'all'>(
+    hasInitialDeepLink ? 'all' : 'selectedWeek'
   );
+  const [selectedWeekStart, setSelectedWeekStart] = useState(() => resolveWeekStart(initialServiceDate));
   const [dateFrom, setDateFrom] = useState(initialServiceDate);
   const [dateTo, setDateTo] = useState(initialServiceDate);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
@@ -186,7 +325,8 @@ export default function BookingsPage() {
       setSearchTerm(bookingRefParam);
       setStatusFilter('all');
       setPaymentFilter('all');
-      setTimeFilter(hasDeepLink ? 'all' : 'today');
+      setTimeFilter(hasDeepLink ? 'all' : 'selectedWeek');
+      setSelectedWeekStart(resolveWeekStart(serviceDateParam));
       setDateFrom(serviceDateParam);
       setDateTo(serviceDateParam);
     }, 0);
@@ -299,6 +439,7 @@ export default function BookingsPage() {
   };
 
   const expireBookingIfNeeded = async (booking: Booking) => {
+    if (!shouldAutoExpireBooking(booking)) return;
     if (!booking.expiracion) return;
     if (booking.pago_realizado || booking.acuerdo_firmado) return;
     if (booking.expirado || booking.estado === 'expirada') return;
@@ -409,22 +550,42 @@ export default function BookingsPage() {
     });
   }, [bookings]);
 
-  const copyContractLink = (booking: Booking) => {
-    if (!booking.token_acceso) {
-        alert('Esta reserva no tiene enlace público generado.');
-        return;
+  const patchBooking = (bookingId: string, patch: Partial<Booking>) => {
+    setBookings((current) =>
+      current.map((item) => (item.id === bookingId ? { ...item, ...patch } : item))
+    );
+  };
+
+  const ensureContractLink = async (booking: Booking) => {
+    if (booking.token_acceso) {
+      return {
+        token: booking.token_acceso,
+        url: getPublicContractUrl(window.location.origin, booking.id, booking.token_acceso),
+      };
     }
-    const url = `${window.location.origin}/contract/${booking.id}?t=${booking.token_acceso}`;
-    navigator.clipboard.writeText(url);
-    alert('Enlace del contrato copiado al portapapeles');
+
+    const { token } = await ensureBookingAccessToken(booking.id);
+    patchBooking(booking.id, { token_acceso: token });
+
+    return {
+      token,
+      url: getPublicContractUrl(window.location.origin, booking.id, token),
+    };
+  };
+
+  const copyContractLink = async (booking: Booking) => {
+    try {
+      const { url } = await ensureContractLink(booking);
+      await navigator.clipboard.writeText(url);
+      alert('Enlace del contrato copiado al portapapeles');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo generar el enlace del contrato';
+      alert(message);
+    }
   };
 
   const openContractTab = (booking: Booking) => {
-    if (!booking.token_acceso) {
-      alert('Esta reserva no tiene enlace de contrato.');
-      return;
-    }
-    const url = `${window.location.origin}/contract/${booking.id}?t=${booking.token_acceso}`;
+    const url = getAdminContractPath(booking.id, booking.token_acceso);
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
@@ -463,10 +624,10 @@ export default function BookingsPage() {
 
   const getAgentName = (booking: Booking): string => {
     if (booking.broker_id && users[booking.broker_id]) {
-      return users[booking.broker_id].nombre || 'Broker desconocido';
+      return users[booking.broker_id].empresa_nombre || users[booking.broker_id].nombre || 'Broker desconocido';
     }
     if (booking.agency_id && users[booking.agency_id]) {
-      return users[booking.agency_id].nombre || 'Agencia desconocida';
+      return users[booking.agency_id].empresa_nombre || users[booking.agency_id].nombre || 'Agencia desconocida';
     }
     if (booking.colaborador_id && users[booking.colaborador_id]) {
       return users[booking.colaborador_id].nombre || 'Colaborador desconocido';
@@ -507,6 +668,7 @@ export default function BookingsPage() {
     const bookingEnd = getDate(booking.fecha_fin);
     const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
     const todayEnd = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999);
+    const selectedWeekEnd = endOfWeek(selectedWeekStart, WEEK_OPTIONS);
     const hasDateRange = Boolean(dateFrom || dateTo);
     const rangeStart = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null;
     const rangeEnd = dateTo ? new Date(`${dateTo}T23:59:59`) : null;
@@ -535,6 +697,7 @@ export default function BookingsPage() {
         booking.hora_entrega,
         getLocationLabel(booking),
         booking.notas,
+        booking.partner_internal_note,
         booking.token_acceso,
         productsText,
       ].filter(Boolean).join(' '));
@@ -554,9 +717,7 @@ export default function BookingsPage() {
       ? (!rangeStart || bookingEnd >= rangeStart) && (!rangeEnd || bookingStart <= rangeEnd)
       : timeFilter === 'all'
         ? true
-        : timeFilter === 'today'
-          ? bookingEnd >= todayStart && bookingStart <= todayEnd
-          : bookingStart > todayEnd;
+        : bookingEnd >= selectedWeekStart && bookingStart <= selectedWeekEnd;
 
     return matchesSearch && matchesStatus && matchesPayment && matchesTime;
   }).sort((a, b) => {
@@ -603,7 +764,8 @@ export default function BookingsPage() {
     setSearchTerm('');
     setStatusFilter('all');
     setPaymentFilter('all');
-    setTimeFilter('today');
+    setTimeFilter('selectedWeek');
+    setSelectedWeekStart(startOfWeek(new Date(), WEEK_OPTIONS));
     setDateFrom('');
     setDateTo('');
   };
@@ -643,51 +805,50 @@ export default function BookingsPage() {
     };
   };
 
-  const applyTopFilter = (preset: 'today' | 'unpaidToday' | 'confirmedToday' | 'paidToday') => {
+  const applyTopFilter = (preset: 'selectedWeek' | 'unpaidSelectedWeek' | 'confirmedSelectedWeek' | 'paidSelectedWeek') => {
     setSearchTerm('');
     setDateFrom('');
     setDateTo('');
-    setTimeFilter('today');
+    setTimeFilter('selectedWeek');
+    setStatusFilter('all');
+    setPaymentFilter('all');
 
-    if (preset === 'today') {
-      setStatusFilter('all');
-      setPaymentFilter('all');
+    if (preset === 'selectedWeek') {
       return;
     }
 
-    if (preset === 'unpaidToday') {
-      setStatusFilter('all');
+    if (preset === 'unpaidSelectedWeek') {
       setPaymentFilter('unpaid');
       return;
     }
 
-    if (preset === 'confirmedToday') {
+    if (preset === 'confirmedSelectedWeek') {
       setStatusFilter('confirmada');
-      setPaymentFilter('all');
       return;
     }
 
-    setStatusFilter('all');
     setPaymentFilter('paid');
   };
 
   const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
   const todayEnd = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 23, 59, 59, 999);
-  const todaysBookings = bookings.filter((booking) => {
+  const selectedWeekEnd = endOfWeek(selectedWeekStart, WEEK_OPTIONS);
+  const selectedWeekBookings = bookings.filter((booking) => {
     const start = getDate(booking.fecha_inicio);
     const end = getDate(booking.fecha_fin);
-    return end >= todayStart && start <= todayEnd;
+    return end >= selectedWeekStart && start <= selectedWeekEnd;
   });
-  const todayUnpaid = todaysBookings.filter((booking) => !booking.pago_realizado).length;
-  const todayConfirmed = todaysBookings.filter((booking) => booking.estado === 'confirmada').length;
-  const todayPaidRevenue = todaysBookings
+  const selectedWeekUnpaid = selectedWeekBookings.filter((booking) => !booking.pago_realizado).length;
+  const selectedWeekConfirmed = selectedWeekBookings.filter((booking) => booking.estado === 'confirmada').length;
+  const selectedWeekPaidRevenue = selectedWeekBookings
     .filter((booking) => booking.pago_realizado && !booking.reembolso_realizado)
     .reduce((sum, booking) => sum + (booking.precio_total || 0), 0);
+  const isCurrentWeekSelected = selectedWeekStart.getTime() === startOfWeek(new Date(), WEEK_OPTIONS).getTime();
   const hasActiveFilters = Boolean(
     searchTerm.trim() ||
       statusFilter !== 'all' ||
       paymentFilter !== 'all' ||
-      timeFilter !== 'today' ||
+      timeFilter !== 'selectedWeek' ||
       dateFrom ||
       dateTo
   );
@@ -695,32 +856,37 @@ export default function BookingsPage() {
     !dateFrom &&
     !dateTo &&
     !searchTerm.trim() &&
-    timeFilter === 'today' &&
+    timeFilter === 'selectedWeek' &&
     statusFilter === 'all' &&
     paymentFilter === 'all'
-      ? 'today'
+      ? 'selectedWeek'
       : !dateFrom &&
           !dateTo &&
           !searchTerm.trim() &&
-          timeFilter === 'today' &&
+          timeFilter === 'selectedWeek' &&
           statusFilter === 'all' &&
           paymentFilter === 'unpaid'
-        ? 'unpaidToday'
+        ? 'unpaidSelectedWeek'
         : !dateFrom &&
             !dateTo &&
             !searchTerm.trim() &&
-            timeFilter === 'today' &&
+            timeFilter === 'selectedWeek' &&
             statusFilter === 'confirmada' &&
             paymentFilter === 'all'
-          ? 'confirmedToday'
+          ? 'confirmedSelectedWeek'
           : !dateFrom &&
               !dateTo &&
               !searchTerm.trim() &&
-              timeFilter === 'today' &&
+              timeFilter === 'selectedWeek' &&
               statusFilter === 'all' &&
               paymentFilter === 'paid'
-            ? 'paidToday'
+            ? 'paidSelectedWeek'
             : null;
+  const selectedWeekLabel = `${format(selectedWeekStart, 'dd MMM', { locale: es })} - ${format(
+    selectedWeekEnd,
+    'dd MMM yyyy',
+    { locale: es }
+  )}`;
 
   if (loading) {
     return (
@@ -759,20 +925,77 @@ export default function BookingsPage() {
         </button>
       </div>
 
+      {!dateFrom && !dateTo ? (
+        <div className="flex flex-col gap-3 rounded-xl bg-white p-4 ring-1 ring-slate-200/70 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl bg-blue-50 p-2.5 text-blue-600 ring-1 ring-blue-200/70">
+              <CalendarDays size={18} />
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Semana visible</p>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <p className="rounded-full bg-blue-600 px-3 py-1 text-sm font-semibold text-white shadow-sm">
+                  {selectedWeekLabel}
+                </p>
+                {isCurrentWeekSelected ? (
+                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-800">
+                    Actual
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Navega semana a semana para revisar todas las reservas sin cambiar filtros manualmente.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setSelectedWeekStart((current) => startOfWeek(subWeeks(current, 1), WEEK_OPTIONS))}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              Semana anterior
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedWeekStart(startOfWeek(new Date(), WEEK_OPTIONS));
+                setTimeFilter('selectedWeek');
+              }}
+              className={clsx(
+                'rounded-lg border px-3 py-2 text-sm font-medium transition',
+                isCurrentWeekSelected
+                  ? 'border-blue-300 bg-blue-50 text-blue-700'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              )}
+            >
+              Esta semana
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedWeekStart((current) => startOfWeek(addWeeks(current, 1), WEEK_OPTIONS))}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              Semana siguiente
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* Quick Overview — desktop/tablet only; keeps mobile focused on the list */}
       <div className="hidden gap-3 sm:grid sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
         <button
           type="button"
-          onClick={() => applyTopFilter('today')}
+          onClick={() => applyTopFilter('selectedWeek')}
           className={clsx(
             'rounded-xl bg-white p-3.5 text-left ring-1 ring-slate-200/70 transition hover:bg-slate-50/80',
-            activeTopPreset === 'today' ? 'ring-2 ring-blue-300/80 bg-blue-50/30' : ''
+            activeTopPreset === 'selectedWeek' ? 'ring-2 ring-blue-300/80 bg-blue-50/30' : ''
           )}
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Reservas de Hoy</p>
-              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{todaysBookings.length}</p>
+              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Reservas semana visible</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{selectedWeekBookings.length}</p>
             </div>
             <div className="rounded-lg bg-blue-50 p-2 text-blue-600 sm:p-2.5">
               <Calendar size={17} />
@@ -781,16 +1004,16 @@ export default function BookingsPage() {
         </button>
         <button
           type="button"
-          onClick={() => applyTopFilter('unpaidToday')}
+          onClick={() => applyTopFilter('unpaidSelectedWeek')}
           className={clsx(
             'rounded-xl bg-white p-3.5 text-left ring-1 ring-slate-200/70 transition hover:bg-slate-50/80',
-            activeTopPreset === 'unpaidToday' ? 'ring-2 ring-amber-300/80 bg-amber-50/20' : ''
+            activeTopPreset === 'unpaidSelectedWeek' ? 'ring-2 ring-amber-300/80 bg-amber-50/20' : ''
           )}
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Sin Pago Hoy</p>
-              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{todayUnpaid}</p>
+              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Sin pago semana visible</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{selectedWeekUnpaid}</p>
             </div>
             <div className="rounded-lg bg-amber-50 p-2 text-amber-600 sm:p-2.5">
               <Clock size={17} />
@@ -799,16 +1022,16 @@ export default function BookingsPage() {
         </button>
         <button
           type="button"
-          onClick={() => applyTopFilter('confirmedToday')}
+          onClick={() => applyTopFilter('confirmedSelectedWeek')}
           className={clsx(
             'rounded-xl bg-white p-3.5 text-left ring-1 ring-slate-200/70 transition hover:bg-slate-50/80',
-            activeTopPreset === 'confirmedToday' ? 'ring-2 ring-emerald-300/80 bg-emerald-50/20' : ''
+            activeTopPreset === 'confirmedSelectedWeek' ? 'ring-2 ring-emerald-300/80 bg-emerald-50/20' : ''
           )}
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Confirmadas Hoy</p>
-              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{todayConfirmed}</p>
+              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Confirmadas semana visible</p>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">{selectedWeekConfirmed}</p>
             </div>
             <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600 sm:p-2.5">
               <CheckCircle2 size={17} />
@@ -817,17 +1040,17 @@ export default function BookingsPage() {
         </button>
         <button
           type="button"
-          onClick={() => applyTopFilter('paidToday')}
+          onClick={() => applyTopFilter('paidSelectedWeek')}
           className={clsx(
             'rounded-xl bg-white p-3.5 text-left ring-1 ring-slate-200/70 transition hover:bg-slate-50/80',
-            activeTopPreset === 'paidToday' ? 'ring-2 ring-slate-400/60 bg-slate-50/50' : ''
+            activeTopPreset === 'paidSelectedWeek' ? 'ring-2 ring-slate-400/60 bg-slate-50/50' : ''
           )}
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Ingresos Hoy</p>
+              <p className="text-[11px] sm:text-xs uppercase text-gray-500 font-semibold">Ingresos semana visible</p>
               <p className="text-xl sm:text-2xl font-bold text-gray-900 mt-0.5 sm:mt-1">
-                €{todayPaidRevenue.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
+                €{selectedWeekPaidRevenue.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
               </p>
             </div>
             <div className="rounded-lg bg-slate-900 p-2 text-white sm:p-2.5">
@@ -900,11 +1123,10 @@ export default function BookingsPage() {
               <select
                 id="timeFilter"
                 value={timeFilter}
-                onChange={(event) => setTimeFilter(event.target.value as 'today' | 'upcoming' | 'all')}
+                onChange={(event) => setTimeFilter(event.target.value as 'selectedWeek' | 'all')}
                 className="w-full min-w-0 rounded-lg bg-white px-3 py-2 text-sm font-medium text-slate-800 ring-1 ring-slate-200/80 focus:outline-none focus:ring-slate-300"
               >
-                <option value="today">Hoy</option>
-                <option value="upcoming">Próximas</option>
+                <option value="selectedWeek">Semana visible</option>
                 <option value="all">Todas</option>
               </select>
             </div>
@@ -972,7 +1194,7 @@ export default function BookingsPage() {
       </div>
 
       {/* Bookings List */}
-      <div className="overflow-hidden rounded-xl bg-white ring-1 ring-slate-200/70">
+      <div className="overflow-visible rounded-xl bg-white ring-1 ring-slate-200/70">
         {filteredBookings.length > 0 ? (
           <>
             {/* Mobile Cards */}
@@ -986,6 +1208,9 @@ export default function BookingsPage() {
                 const isExpired = isExpiredBooking(booking);
                 const paymentBadge = getPaymentBadgeData(booking);
                 const isExpanded = Boolean(expandedBookings[booking.id]);
+                const agentName = getAgentName(booking);
+                const agentType = getAgentType(booking);
+                const highlightAgent = agentType === 'Broker' || agentType === 'Agencia';
                 const isFirstOfDateGroup =
                   index === 0 ||
                   getBookingServiceDateKey(booking) !== getBookingServiceDateKey(filteredBookings[index - 1]);
@@ -1039,7 +1264,7 @@ export default function BookingsPage() {
                             onClose={() => setOpenActionMenuId(null)}
                             onViewDetails={() => setViewingBooking(booking)}
                             onPayment={() => setPaymentManaging(booking)}
-                            onCopyContract={() => copyContractLink(booking)}
+                            onCopyContract={() => void copyContractLink(booking)}
                             onOpenContract={() => openContractTab(booking)}
                             onCancel={() => void handleCancelBooking(booking)}
                           />
@@ -1051,6 +1276,12 @@ export default function BookingsPage() {
                           <div className="text-xs uppercase text-gray-500 font-semibold">Cliente</div>
                           <div className="text-gray-900 font-medium">{booking.cliente.nombre}</div>
                           <div className="text-xs text-gray-500">{booking.cliente.email}</div>
+                          {highlightAgent ? (
+                            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-[11px] font-semibold text-violet-800 ring-1 ring-violet-200/80">
+                              <Briefcase size={12} />
+                              {agentType}: {agentName}
+                            </div>
+                          ) : null}
                         </div>
                         <div>
                           <div className="text-xs uppercase text-gray-500 font-semibold">Total</div>
@@ -1215,6 +1446,8 @@ export default function BookingsPage() {
                   index === 0 ||
                   getBookingServiceDateKey(booking) !== getBookingServiceDateKey(filteredBookings[index - 1]);
                 const agentName = getAgentName(booking);
+                const agentType = getAgentType(booking);
+                const highlightAgent = agentType === 'Broker' || agentType === 'Agencia';
                 const totalUnits = booking.items.reduce((sum, item) => sum + (item.cantidad || 0), 0);
                 const isExpired = isExpiredBooking(booking);
                 const paymentBadge = getPaymentBadgeData(booking);
@@ -1247,6 +1480,14 @@ export default function BookingsPage() {
                             {booking.cliente.nombre}
                           </p>
                           <p className="truncate text-sm text-slate-500">{booking.cliente.email}</p>
+                          {highlightAgent ? (
+                            <div className="pt-1">
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-1 text-[11px] font-semibold text-violet-800 ring-1 ring-violet-200/80">
+                                <Briefcase size={12} />
+                                {agentType}: {agentName}
+                              </span>
+                            </div>
+                          ) : null}
                           <p className="text-xs text-slate-400">
                             <span className="font-mono text-slate-500">{booking.numero_reserva}</span>
                             <span className="mx-1.5 text-slate-300" aria-hidden>
@@ -1306,7 +1547,7 @@ export default function BookingsPage() {
                           onClose={() => setOpenActionMenuId(null)}
                           onViewDetails={() => setViewingBooking(booking)}
                           onPayment={() => setPaymentManaging(booking)}
-                          onCopyContract={() => copyContractLink(booking)}
+                          onCopyContract={() => void copyContractLink(booking)}
                           onOpenContract={() => openContractTab(booking)}
                           onCancel={() => void handleCancelBooking(booking)}
                         />
@@ -1407,10 +1648,10 @@ function BookingDetailsModal({
 
   const getAgentName = (booking: Booking): string => {
     if (booking.broker_id && users[booking.broker_id]) {
-      return users[booking.broker_id].nombre || 'Broker desconocido';
+      return users[booking.broker_id].empresa_nombre || users[booking.broker_id].nombre || 'Broker desconocido';
     }
     if (booking.agency_id && users[booking.agency_id]) {
-      return users[booking.agency_id].nombre || 'Agencia desconocida';
+      return users[booking.agency_id].empresa_nombre || users[booking.agency_id].nombre || 'Agencia desconocida';
     }
     if (booking.colaborador_id && users[booking.colaborador_id]) {
       return users[booking.colaborador_id].nombre || 'Colaborador desconocido';
@@ -1776,6 +2017,15 @@ function BookingDetailsModal({
               <h3 className="text-lg font-bold text-gray-900 mb-3">Notas</h3>
               <div className="bg-gray-50 rounded-xl p-4">
                 <p className="text-gray-700">{booking.notas}</p>
+              </div>
+            </section>
+          )}
+
+          {booking.partner_internal_note && (
+            <section>
+              <h3 className="text-lg font-bold text-gray-900 mb-3">Nota interna del broker/agencia</h3>
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                <p className="whitespace-pre-wrap text-gray-700">{booking.partner_internal_note}</p>
               </div>
             </section>
           )}

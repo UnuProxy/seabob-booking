@@ -23,6 +23,31 @@ service firebase.storage {
         );
     }
 
+    function isPartner() {
+      return hasUserDoc()
+        && (
+          userDoc().data.rol == 'broker'
+          || userDoc().data.rol == 'agency'
+        );
+    }
+
+    function bookingDoc(bookingId) {
+      return firestore.get(/databases/(default)/documents/bookings/$(bookingId));
+    }
+
+    function canManageBookingLicense(bookingId) {
+      return isInternalUser()
+        || (
+          isPartner()
+          && bookingDoc(bookingId).data != null
+          && (
+            bookingDoc(bookingId).data.broker_id == request.auth.uid
+            || bookingDoc(bookingId).data.agency_id == request.auth.uid
+            || bookingDoc(bookingId).data.creado_por == request.auth.uid
+          )
+        );
+    }
+
     // Product catalog images are public-read, internal-user-write.
     match /products/{productId}/{fileName} {
       allow read: if true;
@@ -32,6 +57,11 @@ service firebase.storage {
     // Commission docs (invoices/receipts) are internal-only.
     match /commission-documents/{partnerId}/{fileName} {
       allow read, write: if isInternalUser();
+    }
+
+    // Nautical license attachments are visible/editable by staff and the related broker/agency.
+    match /bookings/{bookingId}/nautical-license/{fileName} {
+      allow read, write: if canManageBookingLicense(bookingId);
     }
 
     match /{allPaths=**} {

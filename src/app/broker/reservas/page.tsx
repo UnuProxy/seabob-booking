@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { collection, query, orderBy, onSnapshot, where, getDocs, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { Booking, Product } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
 import { NauticalLicenseManager } from '@/components/bookings/NauticalLicenseManager';
 import { BOOKING_FORM_MODAL_OPEN_KEY, clearBookingDraftStorage } from '@/lib/bookingDraft';
+import { ensureBookingAccessToken, getPublicContractUrl } from '@/lib/bookingAccess';
+import { shouldAutoExpireBooking } from '@/lib/bookingExpiration';
 import { useAuthStore } from '@/store/authStore';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { useSearchParams } from 'next/navigation';
@@ -22,7 +24,6 @@ import {
   Share2,
   Euro,
   Loader2,
-  Ban,
   Calendar,
   CreditCard,
   MoreHorizontal,
@@ -48,6 +49,147 @@ function getDate(dateValue: unknown): Date {
   return new Date();
 }
 
+function BrokerBookingActionsMenu({
+  isOpen,
+  onToggle,
+  onClose,
+  canCharge,
+  isCharging,
+  onViewDetails,
+  onCopyPayment,
+  onOpenContract,
+  onCopyContract,
+}: {
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  canCharge: boolean;
+  isCharging: boolean;
+  onViewDetails: () => void;
+  onCopyPayment: () => void;
+  onOpenContract: () => void;
+  onCopyContract: () => void;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [openUpward, setOpenUpward] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setOpenUpward(false);
+      return;
+    }
+
+    const updatePosition = () => {
+      const root = rootRef.current;
+      const menu = menuRef.current;
+      if (!root || !menu) return;
+
+      const triggerRect = root.getBoundingClientRect();
+      const menuHeight = menu.offsetHeight;
+      const spaceBelow = window.innerHeight - triggerRect.bottom;
+      const spaceAbove = triggerRect.top;
+
+      setOpenUpward(spaceBelow < menuHeight + 12 && spaceAbove > spaceBelow);
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [isOpen]);
+
+  return (
+    <div ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle();
+        }}
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+        aria-label="Acciones"
+        aria-expanded={isOpen}
+      >
+        <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
+      </button>
+      {isOpen ? (
+        <div
+          ref={menuRef}
+          className={clsx(
+            'absolute right-0 z-30 w-60 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80',
+            openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
+          )}
+          onClick={(e) => e.stopPropagation()}
+          role="menu"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              onClose();
+              onViewDetails();
+            }}
+          >
+            <Eye className="h-4 w-4 opacity-70" />
+            Ver detalles
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canCharge || isCharging}
+            className={clsx(
+              'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+              canCharge && !isCharging ? 'text-slate-700 hover:bg-slate-50' : 'cursor-not-allowed text-slate-400'
+            )}
+            onClick={() => {
+              if (!canCharge || isCharging) return;
+              onClose();
+              onCopyPayment();
+            }}
+          >
+            {isCharging ? (
+              <Loader2 className="h-4 w-4 animate-spin opacity-70" />
+            ) : (
+              <CreditCard className="h-4 w-4 opacity-70" />
+            )}
+            Copiar enlace pago
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              onClose();
+              onOpenContract();
+            }}
+          >
+            <Link2 className="h-4 w-4 opacity-70" />
+            Abrir contrato
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+            onClick={() => {
+              onClose();
+              onCopyContract();
+            }}
+          >
+            <Share2 className="h-4 w-4 opacity-70" />
+            Copiar enlace contrato
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function BrokerReservasPage() {
   const { user } = useAuthStore();
   const searchParams = useSearchParams();
@@ -66,8 +208,15 @@ export default function BrokerReservasPage() {
   const [viewingBookingId, setViewingBookingId] = useState(initialViewingBookingId);
   const [chargingBookingId, setChargingBookingId] = useState<string | null>(null);
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+  const [partnerInternalNote, setPartnerInternalNote] = useState('');
+  const [savingPartnerNote, setSavingPartnerNote] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   async function expireBookingIfNeeded(booking: Booking) {
+    if (!shouldAutoExpireBooking(booking)) return;
     if (!booking.expiracion) return;
     if (booking.pago_realizado || booking.acuerdo_firmado) return;
     if (booking.expirado || booking.estado === 'expirada') return;
@@ -199,77 +348,117 @@ export default function BrokerReservasPage() {
     });
   }, [bookings]);
 
-  const copyContractLink = (booking: Booking) => {
-    if (!booking.token_acceso) {
-      alert('Esta reserva no tiene enlace público generado.');
-      return;
-    }
-    const url = `${window.location.origin}/contract/${booking.id}?t=${booking.token_acceso}`;
-    navigator.clipboard.writeText(url);
-    alert('Enlace del contrato copiado al portapapeles');
+  const patchBooking = (bookingId: string, patch: Partial<Booking>) => {
+    setBookings((current) =>
+      current.map((item) => (item.id === bookingId ? { ...item, ...patch } : item))
+    );
   };
 
-  const openContractTab = (booking: Booking) => {
-    if (!booking.token_acceso) {
-      alert('Esta reserva no tiene enlace de contrato.');
-      return;
+  const ensureContractLink = async (booking: Booking) => {
+    if (booking.token_acceso) {
+      return {
+        token: booking.token_acceso,
+        url: getPublicContractUrl(window.location.origin, booking.id, booking.token_acceso),
+      };
     }
-    const url = `${window.location.origin}/contract/${booking.id}?t=${booking.token_acceso}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+
+    const { token } = await ensureBookingAccessToken(booking.id);
+    patchBooking(booking.id, { token_acceso: token });
+
+    return {
+      token,
+      url: getPublicContractUrl(window.location.origin, booking.id, token),
+    };
+  };
+
+  const copyContractLink = async (booking: Booking) => {
+    try {
+      const { url } = await ensureContractLink(booking);
+      await navigator.clipboard.writeText(url);
+      showFeedback('success', 'Enlace del contrato copiado');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo generar el enlace del contrato';
+      showFeedback('error', message);
+    }
+  };
+
+  const openContractTab = async (booking: Booking) => {
+    try {
+      const { url } = await ensureContractLink(booking);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo generar el enlace del contrato';
+      showFeedback('error', message);
+    }
   };
 
   const openOrCreatePayment = async (booking: Booking) => {
     if (booking.pago_realizado) return;
-    if (booking.requires_payment === false) {
-      alert('Esta reserva no requiere pago online.');
-      return;
-    }
-    if (booking.stripe_payment_link) {
-      window.open(booking.stripe_payment_link, '_blank', 'noopener,noreferrer');
-      return;
-    }
+    if (booking.estado === 'cancelada' || booking.estado === 'expirada') return;
     setChargingBookingId(booking.id);
     try {
+      if (booking.stripe_payment_link) {
+        await navigator.clipboard.writeText(booking.stripe_payment_link);
+        showFeedback('success', 'Enlace de pago copiado');
+        return;
+      }
+
+      const { token } = await ensureContractLink(booking);
       const res = await fetch('/api/stripe/create-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           bookingId: booking.id,
-          token: booking.token_acceso || undefined,
+          token,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(typeof data?.error === 'string' ? data.error : 'No se pudo generar el enlace de pago');
+        showFeedback(
+          'error',
+          typeof data?.error === 'string' ? data.error : 'No se pudo generar el enlace de pago'
+        );
         return;
       }
       if (data?.url) {
-        window.open(data.url, '_blank', 'noopener,noreferrer');
+        patchBooking(booking.id, {
+          token_acceso: token,
+          stripe_payment_link: data.url,
+          stripe_checkout_session_id: data.sessionId,
+        });
+        await navigator.clipboard.writeText(data.url);
+        showFeedback('success', 'Enlace de pago generado y copiado');
       } else {
-        alert('No se recibió enlace de pago');
+        showFeedback('error', 'No se recibió enlace de pago');
       }
     } catch {
-      alert('Error al generar el enlace de pago');
+      showFeedback('error', 'Error al generar el enlace de pago');
     } finally {
       setChargingBookingId(null);
     }
   };
 
-  const handleCancelBooking = async (booking: Booking) => {
-    if (!confirm(`¿Estás seguro de que deseas cancelar la reserva ${booking.numero_reserva}?\n\nEsto cambiará el estado a "cancelada" pero mantendrá el registro.`)) {
+  const savePartnerNote = async () => {
+    if (!viewingBooking || savingPartnerNote) return;
+
+    const nextNote = partnerInternalNote.trim();
+    if ((viewingBooking.partner_internal_note || '') === nextNote) {
+      showFeedback('success', 'La nota ya estaba actualizada');
       return;
     }
 
+    setSavingPartnerNote(true);
     try {
-      await releaseBookingStockOnce(booking.id, user?.id || 'broker_panel');
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        estado: 'cancelada',
-        updated_at: serverTimestamp()
+      await updateDoc(doc(db, 'bookings', viewingBooking.id), {
+        partner_internal_note: nextNote,
+        updated_at: serverTimestamp(),
       });
-      alert('Reserva cancelada correctamente');
-    } catch (error) {
-      console.error('Error canceling booking:', error);
-      alert('Error al cancelar la reserva');
+      patchBooking(viewingBooking.id, { partner_internal_note: nextNote });
+      showFeedback('success', nextNote ? 'Nota guardada para el proveedor' : 'Nota eliminada');
+    } catch {
+      showFeedback('error', 'No se pudo guardar la nota');
+    } finally {
+      setSavingPartnerNote(false);
     }
   };
 
@@ -310,9 +499,23 @@ export default function BrokerReservasPage() {
     return () => document.removeEventListener('click', close);
   }, [openActionMenuId]);
 
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = window.setTimeout(() => setFeedback(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
+
   const viewingBooking = viewingBookingId
     ? bookings.find((booking) => booking.id === viewingBookingId) || null
     : null;
+
+  const showFeedback = (type: 'success' | 'error', message: string) => {
+    setFeedback({ type, message });
+  };
+
+  useEffect(() => {
+    setPartnerInternalNote(viewingBooking?.partner_internal_note || '');
+  }, [viewingBooking?.id, viewingBooking?.partner_internal_note]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -397,6 +600,21 @@ export default function BrokerReservasPage() {
 
   return (
     <div className="space-y-8">
+      {feedback ? (
+        <div className="fixed right-4 top-4 z-60">
+          <div
+            className={clsx(
+              'rounded-xl px-4 py-3 text-sm font-medium shadow-lg ring-1 backdrop-blur',
+              feedback.type === 'success'
+                ? 'bg-emerald-50/95 text-emerald-800 ring-emerald-200'
+                : 'bg-rose-50/95 text-rose-800 ring-rose-200'
+            )}
+          >
+            {feedback.message}
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Mis reservas</h1>
@@ -490,7 +708,7 @@ export default function BrokerReservasPage() {
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-xl bg-white ring-1 ring-slate-200/70">
+      <div className="overflow-visible rounded-xl bg-white ring-1 ring-slate-200/70">
         {filteredBookings.length === 0 ? (
           <div className="px-6 py-14 text-center text-sm text-slate-500">
             {bookings.length === 0
@@ -522,11 +740,9 @@ export default function BrokerReservasPage() {
                       : '—';
                     const canCharge =
                       !paid &&
-                      booking.requires_payment !== false &&
                       booking.estado !== 'cancelada' &&
                       booking.estado !== 'expirada';
                     const isCharging = chargingBookingId === booking.id;
-                    const canCancel = booking.estado !== 'cancelada';
                     const menuOpen = openActionMenuId === booking.id;
 
                     return (
@@ -590,101 +806,17 @@ export default function BrokerReservasPage() {
                               </p>
                             </div>
 
-                            <div className="relative shrink-0">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenActionMenuId((id) => (id === booking.id ? null : booking.id));
-                                }}
-                                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
-                                aria-label="Acciones"
-                                aria-expanded={menuOpen}
-                              >
-                                <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
-                              </button>
-                              {menuOpen ? (
-                                <div
-                                  className="absolute right-0 top-full z-30 mt-1 w-52 rounded-lg bg-white py-1 shadow-lg ring-1 ring-slate-200/80"
-                                  onClick={(e) => e.stopPropagation()}
-                                  role="menu"
-                                >
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                                    onClick={() => {
-                                      setOpenActionMenuId(null);
-                                      setViewingBookingId(booking.id);
-                                    }}
-                                  >
-                                    <Eye className="h-4 w-4 opacity-70" />
-                                    Ver detalles
-                                  </button>
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    disabled={!canCharge || isCharging}
-                                    className={clsx(
-                                      'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
-                                      canCharge && !isCharging
-                                        ? 'text-slate-700 hover:bg-slate-50'
-                                        : 'cursor-not-allowed text-slate-400'
-                                    )}
-                                    onClick={() => {
-                                      if (!canCharge || isCharging) return;
-                                      setOpenActionMenuId(null);
-                                      void openOrCreatePayment(booking);
-                                    }}
-                                  >
-                                    {isCharging ? (
-                                      <Loader2 className="h-4 w-4 animate-spin opacity-70" />
-                                    ) : (
-                                      <CreditCard className="h-4 w-4 opacity-70" />
-                                    )}
-                                    Cobrar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                                    onClick={() => {
-                                      setOpenActionMenuId(null);
-                                      openContractTab(booking);
-                                    }}
-                                  >
-                                    <Link2 className="h-4 w-4 opacity-70" />
-                                    Abrir contrato
-                                  </button>
-                                  <button
-                                    type="button"
-                                    role="menuitem"
-                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
-                                    onClick={() => {
-                                      setOpenActionMenuId(null);
-                                      copyContractLink(booking);
-                                    }}
-                                  >
-                                    <Share2 className="h-4 w-4 opacity-70" />
-                                    Copiar enlace
-                                  </button>
-                                  {canCancel ? (
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50"
-                                      onClick={() => {
-                                        setOpenActionMenuId(null);
-                                        void handleCancelBooking(booking);
-                                      }}
-                                    >
-                                      <Ban className="h-4 w-4 opacity-80" />
-                                      Cancelar reserva
-                                    </button>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                            </div>
+                            <BrokerBookingActionsMenu
+                              isOpen={menuOpen}
+                              onToggle={() => setOpenActionMenuId((id) => (id === booking.id ? null : booking.id))}
+                              onClose={() => setOpenActionMenuId(null)}
+                              canCharge={canCharge}
+                              isCharging={isCharging}
+                              onViewDetails={() => setViewingBookingId(booking.id)}
+                              onCopyPayment={() => void openOrCreatePayment(booking)}
+                              onOpenContract={() => void openContractTab(booking)}
+                              onCopyContract={() => void copyContractLink(booking)}
+                            />
                           </div>
                         </div>
                       </li>
@@ -826,23 +958,65 @@ export default function BrokerReservasPage() {
                 </div>
               )}
 
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label className="text-sm font-bold uppercase tracking-wide text-slate-800">
+                    Nota interna para proveedor
+                  </label>
+                  <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800">
+                    Solo interno
+                  </span>
+                </div>
+                <div className="rounded-xl border-2 border-amber-200 bg-linear-to-br from-amber-50 to-white p-5 shadow-sm">
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-100/70 px-3 py-2 text-sm font-medium text-amber-900">
+                    Usa este espacio para dejar instrucciones, contexto o avisos importantes para el equipo del proveedor.
+                  </div>
+                  <textarea
+                    value={partnerInternalNote}
+                    onChange={(event) => setPartnerInternalNote(event.target.value)}
+                    rows={4}
+                    placeholder="Añade aquí cualquier instrucción o comentario para el equipo interno..."
+                    className="w-full resize-y rounded-xl border border-amber-200 bg-white px-4 py-3 text-sm text-slate-800 shadow-sm outline-none placeholder:text-slate-400 focus:border-amber-300 focus:ring-2 focus:ring-amber-200"
+                  />
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium text-slate-600">
+                      Esta nota solo la ve el proveedor en el panel interno.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void savePartnerNote()}
+                      disabled={savingPartnerNote}
+                      className="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {savingPartnerNote ? 'Guardando...' : 'Guardar nota'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
                 <button
                   type="button"
-                  onClick={() => copyContractLink(viewingBooking)}
+                  onClick={() => void copyContractLink(viewingBooking)}
                   className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
                   <Share2 className="h-4 w-4" />
                   Copiar enlace contrato
                 </button>
-                {viewingBooking.estado !== 'cancelada' ? (
+                {!viewingBooking.pago_realizado &&
+                viewingBooking.estado !== 'cancelada' &&
+                viewingBooking.estado !== 'expirada' ? (
                   <button
                     type="button"
-                    onClick={() => handleCancelBooking(viewingBooking)}
-                    className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-800 hover:bg-rose-100"
+                    onClick={() => void openOrCreatePayment(viewingBooking)}
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    <Ban className="h-4 w-4" />
-                    Cancelar reserva
+                    {chargingBookingId === viewingBooking.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-4 w-4" />
+                    )}
+                    Copiar enlace pago
                   </button>
                 ) : null}
               </div>

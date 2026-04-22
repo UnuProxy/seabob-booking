@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebase/admin';
 import { getBookingClientTotals } from '@/lib/bookingClientPricing';
+import { shouldAutoExpireBooking } from '@/lib/bookingExpiration';
 import type { Booking, Product } from '@/types';
 
 // Initialize Stripe only if keys are present
@@ -45,10 +46,6 @@ export async function POST(request: NextRequest) {
 
     if (booking.pago_realizado) {
       return NextResponse.json({ error: 'Booking already paid' }, { status: 409 });
-    }
-
-    if (booking.requires_payment === false) {
-      return NextResponse.json({ error: 'Payment is not required for this booking' }, { status: 409 });
     }
 
     if (booking.expirado || booking.estado === 'expirada') {
@@ -115,7 +112,9 @@ export async function POST(request: NextRequest) {
             ? new Date(expirationValue as string)
             : null;
     const expirationDate =
-      rawExpirationDate && !isNaN(rawExpirationDate.getTime()) ? rawExpirationDate : null;
+      shouldAutoExpireBooking(booking) && rawExpirationDate && !isNaN(rawExpirationDate.getTime())
+        ? rawExpirationDate
+        : null;
 
     // Create Checkout Session
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [

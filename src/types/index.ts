@@ -203,6 +203,8 @@ export interface Booking {
   creado_por?: string;
   pdf_acuerdo_url?: string;
   notas?: string;
+  partner_internal_note?: string;
+  admin_booking_notified_at?: Date | string;
   creado_en: Date | string;
   confirmado_en?: Date | string;
   updated_at?: Date | string;
