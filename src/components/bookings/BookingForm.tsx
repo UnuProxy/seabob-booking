@@ -32,7 +32,7 @@ import { addDays, format, eachDayOfInterval } from 'date-fns';
 
 interface BookingFormProps {
   onClose: () => void;
-  onSuccess?: (data: { contractUrl: string; paymentUrl?: string; bookingId: string }) => void;
+  onSuccess?: (data: { contractUrl?: string; paymentUrl?: string; bookingId: string }) => void;
   initialSelectedProductId?: string;
 }
 
@@ -77,7 +77,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const [productStock, setProductStock] = useState<Record<string, { available: number; isOutOfStock: boolean; isLowStock: boolean }>>({});
   const [error, setError] = useState('');
   const [successData, setSuccessData] = useState<{
-    contractUrl: string;
+    contractUrl?: string;
     paymentUrl?: string;
     bookingId: string;
   } | null>(null);
@@ -570,8 +570,14 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       // Generate Ref
       const ref = `RES-${format(new Date(), 'ddMMyy')}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
       
-      // Generate secure token for public access
-      const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      const shouldGenerateAccessLink = !(
+        user.rol === 'broker' ||
+        user.rol === 'agency' ||
+        (user.rol === 'admin' && (partnerType === 'broker' || partnerType === 'agency'))
+      );
+      const token = shouldGenerateAccessLink
+        ? Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+        : null;
 
       const bookingClientTotals = getBookingClientTotals(
         items,
@@ -640,7 +646,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       const bypassPaymentRequirement = (user.rol === 'admin' && skipPayment) || partnerAllowsBookingWithoutPayment;
 
       let expiracion: Date | null = null;
-      if (!bypassPaymentRequirement) {
+      if (!bypassPaymentRequirement && shouldGenerateAccessLink) {
         const expirationOwnerRole =
           user.rol === 'broker' || user.rol === 'agency'
             ? user.rol
@@ -685,7 +691,6 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         hora_entrega: deliveryTime,
         
         // Public Contract
-        token_acceso: token,
         firma_cliente: null,
         terminos_aceptados: false,
         pago_realizado: false,
@@ -700,6 +705,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         creado_en: serverTimestamp(),
         creado_por: user.id,
         origen: 'panel',
+        ...(token ? { token_acceso: token } : {}),
         ...(partnerType === 'directo' ? { cliente_directo: true } : {}),
         ...(user.rol === 'broker' ? { broker_id: user.id } : {}),
         ...(user.rol === 'agency' ? { agency_id: user.id } : {}),
@@ -788,7 +794,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       }
 
       let paymentUrl: string | undefined;
-      if (!bypassPaymentRequirement) {
+      if (!bypassPaymentRequirement && token) {
         // 3. Generate Stripe payment link
         try {
           const response = await fetch('/api/stripe/create-checkout', {
@@ -821,7 +827,21 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         }
       }
 
-      const contractUrl = `${window.location.origin}/contract/${bookingId}?t=${token}`;
+      const contractUrl = token
+        ? `${window.location.origin}/contract/${bookingId}?t=${token}`
+        : undefined;
+      void fetch('/api/notifications/booking-created', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bookingId,
+          token: token || undefined,
+        }),
+      }).catch((notificationError) => {
+        console.error('Error sending booking notification:', notificationError);
+      });
       const successPayload = { contractUrl, paymentUrl, bookingId };
       clearBookingDraftStorage();
       setSuccessData(successPayload);
@@ -885,13 +905,19 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   };
 
   if (successData) {
+    const contractUrl = successData.contractUrl;
+
     return (
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
           <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-slate-50 rounded-t-2xl">
             <div>
               <h2 className="text-2xl font-bold text-gray-800">Reserva creada</h2>
-              <p className="text-gray-500 text-sm mt-1">Copia los enlaces antes de cerrar.</p>
+              <p className="text-gray-500 text-sm mt-1">
+                {contractUrl
+                  ? 'Copia los enlaces antes de cerrar.'
+                  : 'La reserva queda guardada y podras generar los enlaces mas tarde.'}
+              </p>
             </div>
             <button
               onClick={onClose}
@@ -902,28 +928,37 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
           </div>
 
           <div className="p-6 space-y-5">
-            <div className="border border-slate-200 rounded-xl p-4">
-              <p className="text-sm font-semibold text-slate-700 mb-2">Enlace del contrato</p>
-              <div className="flex flex-col md:flex-row gap-3">
-                <input
-                  readOnly
-                  value={successData.contractUrl}
-                  className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-slate-50"
-                />
-                <button
-                  type="button"
-                  onClick={() => copyText(successData.contractUrl)}
-                  className="btn-primary"
-                >
-                  Copiar
-                </button>
+            {contractUrl ? (
+              <div className="border border-slate-200 rounded-xl p-4">
+                <p className="text-sm font-semibold text-slate-700 mb-2">Enlace del contrato</p>
+                <div className="flex flex-col md:flex-row gap-3">
+                  <input
+                    readOnly
+                    value={contractUrl}
+                    className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-700 bg-slate-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => copyText(contractUrl)}
+                    className="btn-primary"
+                  >
+                    Copiar
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                Para esta reserva no se ha creado ningun enlace automatico. El broker podra generar el
+                contrato o el enlace de pago desde la ficha de la reserva cuando lo necesite.
+              </div>
+            )}
 
             <div className="text-xs text-slate-500">
-              {successData.paymentUrl
-                ? 'El enlace del contrato incluye el botón de pago.'
-                : 'El enlace del contrato permite firmar sin pago previo para este partner.'}
+              {contractUrl
+                ? successData.paymentUrl
+                  ? 'El enlace del contrato incluye el boton de pago.'
+                  : 'El enlace del contrato permite firmar sin pago previo para este partner.'
+                : 'No se ha generado ningun enlace de contrato ni de pago en este paso.'}
             </div>
 
             <div className="flex justify-end gap-3">

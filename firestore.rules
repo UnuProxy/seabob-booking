@@ -137,7 +137,8 @@ service cloud.firestore {
               'nautical_license_path',
               'nautical_license_name',
               'nautical_license_type',
-              'nautical_license_uploaded_at'
+              'nautical_license_uploaded_at',
+              'partner_internal_note'
             ])
         )
         || (
@@ -154,7 +155,8 @@ service cloud.firestore {
               'nautical_license_path',
               'nautical_license_name',
               'nautical_license_type',
-              'nautical_license_uploaded_at'
+              'nautical_license_uploaded_at',
+              'partner_internal_note'
             ])
         );
 

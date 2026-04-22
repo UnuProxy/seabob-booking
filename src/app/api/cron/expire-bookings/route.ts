@@ -3,6 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { getAdminDb } from '@/lib/firebase/admin';
 import { Booking } from '@/types';
 import { releaseBookingStockOnceAdmin } from '@/lib/bookingStockAdmin';
+import { shouldAutoExpireBooking } from '@/lib/bookingExpiration';
 
 const CRON_SECRET = process.env.CRON_SECRET;
 
@@ -53,6 +54,7 @@ export async function GET(request: NextRequest) {
     for (const docSnap of snapshot.docs) {
       const booking = { id: docSnap.id, ...docSnap.data() } as Booking;
 
+      if (!shouldAutoExpireBooking(booking)) continue;
       if (!booking.expiracion) continue;
       if (booking.expirado || booking.estado === 'expirada') continue;
       if (booking.pago_realizado || booking.acuerdo_firmado) continue;

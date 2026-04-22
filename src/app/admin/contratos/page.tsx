@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { ensureBookingAccessToken, getAdminContractPath, getPublicContractUrl } from '@/lib/bookingAccess';
+import { shouldAutoExpireBooking } from '@/lib/bookingExpiration';
 import type { Booking } from '@/types';
 import { useAuthStore } from '@/store/authStore';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Copy, ExternalLink, FileText } from 'lucide-react';
+import { Copy, ExternalLink } from 'lucide-react';
 import clsx from 'clsx';
 
 const statusStyles: Record<string, string> = {
@@ -40,6 +42,7 @@ export default function ContractsPage() {
   const now = new Date();
 
   const isExpiredBooking = (booking: Booking) => {
+    if (!shouldAutoExpireBooking(booking)) return false;
     if (booking.expirado || booking.estado === 'expirada') return true;
     if (!booking.expiracion) return false;
     if (booking.pago_realizado || booking.acuerdo_firmado) return false;
@@ -47,6 +50,7 @@ export default function ContractsPage() {
   };
 
   const expireBookingIfNeeded = async (booking: Booking) => {
+    if (!shouldAutoExpireBooking(booking)) return;
     if (!booking.expiracion) return;
     if (booking.expirado || booking.estado === 'expirada') return;
     if (booking.pago_realizado || booking.acuerdo_firmado) return;
@@ -105,14 +109,25 @@ export default function ContractsPage() {
     });
   }, [bookings, searchTerm]);
 
+  const patchBooking = (bookingId: string, patch: Partial<Booking>) => {
+    setBookings((current) =>
+      current.map((item) => (item.id === bookingId ? { ...item, ...patch } : item))
+    );
+  };
+
   const handleCopy = async (booking: Booking) => {
-    if (!booking.token_acceso) {
-      alert('Esta reserva no tiene enlace publico generado.');
-      return;
+    try {
+      const token = booking.token_acceso || (await ensureBookingAccessToken(booking.id)).token;
+      if (!booking.token_acceso) {
+        patchBooking(booking.id, { token_acceso: token });
+      }
+      const url = getPublicContractUrl(window.location.origin, booking.id, token);
+      await navigator.clipboard.writeText(url);
+      alert('Enlace del contrato copiado al portapapeles.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo generar el enlace del contrato.';
+      alert(message);
     }
-    const url = `${window.location.origin}/contract/${booking.id}?t=${booking.token_acceso}`;
-    await navigator.clipboard.writeText(url);
-    alert('Enlace del contrato copiado al portapapeles.');
   };
 
   if (loading) {
@@ -167,9 +182,7 @@ export default function ContractsPage() {
                 </tr>
               ) : (
                 filteredBookings.map((booking) => {
-                  const contractUrl = booking.token_acceso
-                    ? `/contract/${booking.id}?t=${booking.token_acceso}&view=admin`
-                    : null;
+                  const contractUrl = getAdminContractPath(booking.id, booking.token_acceso);
                   const statusClass = statusStyles[booking.estado] || 'bg-slate-100 text-slate-600 border-slate-200';
 
                   return (
@@ -197,26 +210,19 @@ export default function ContractsPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2">
-                          {contractUrl ? (
-                            <a
-                              href={contractUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="btn-primary text-xs"
-                            >
-                              <ExternalLink size={14} />
-                              Ver contrato
-                            </a>
-                          ) : (
-                            <span className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-400">
-                              <FileText size={14} />
-                              Sin enlace
-                            </span>
-                          )}
+                          <a
+                            href={contractUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn-primary text-xs"
+                          >
+                            <ExternalLink size={14} />
+                            Ver contrato
+                          </a>
 
                           <button
                             type="button"
-                            onClick={() => handleCopy(booking)}
+                            onClick={() => void handleCopy(booking)}
                             className="btn-outline text-xs"
                           >
                             <Copy size={14} />

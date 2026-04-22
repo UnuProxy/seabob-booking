@@ -9,6 +9,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Plus, Eye, Share2, Calendar, Euro, Wallet, ArrowRight, Package, X } from 'lucide-react';
 import Link from 'next/link';
+import { ensureBookingAccessToken, getPublicContractUrl } from '@/lib/bookingAccess';
 import { usePartnerCommissions } from '@/lib/firebase/hooks/usePartnerCommissions';
 import { getProductBaseDailyPrice } from '@/lib/productPricing';
 import { getProductTypeLabel, sortProductsByPriority } from '@/lib/productTypes';
@@ -120,10 +121,19 @@ export default function BrokerDashboard() {
   }, []);
 
   const handleShare = async (booking: Booking) => {
-    if (booking.token_acceso) {
-      const contractUrl = `${window.location.origin}/contract/${booking.id}?t=${booking.token_acceso}`;
+    try {
+      const token = booking.token_acceso || (await ensureBookingAccessToken(booking.id)).token;
+      if (!booking.token_acceso) {
+        setBookings((current) =>
+          current.map((item) => (item.id === booking.id ? { ...item, token_acceso: token } : item))
+        );
+      }
+      const contractUrl = getPublicContractUrl(window.location.origin, booking.id, token);
       await navigator.clipboard.writeText(contractUrl);
       alert('Enlace copiado al portapapeles');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo generar el enlace';
+      alert(message);
     }
   };
 

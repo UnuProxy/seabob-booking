@@ -17,13 +17,13 @@ import { Booking, BookingItem, Product } from '@/types';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
 import { getBookingClientTotals } from '@/lib/bookingClientPricing';
 import { getBookingDeliveryFee, getDeliveryLocationLabel } from '@/lib/deliveryLocations';
+import { shouldAutoExpireBooking } from '@/lib/bookingExpiration';
 import { useParams, useSearchParams } from 'next/navigation';
 import {
   Anchor,
   CheckCircle,
   CreditCard,
   Download,
-  ExternalLink,
   FileText,
   Languages,
   Loader2,
@@ -392,10 +392,6 @@ export default function ContractPage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [paymentSyncAttempted, setPaymentSyncAttempted] = useState(false);
-  const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
-  const [paymentLinkError, setPaymentLinkError] = useState<string | null>(null);
-  const getErrorMessage = (error: unknown) =>
-    typeof error === 'object' && error && 'message' in error ? String((error as { message?: unknown }).message || '') : '';
   const requiresPayment = booking?.requires_payment !== false;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -436,17 +432,14 @@ export default function ContractPage() {
             setSuccess(true);
           }
 
-          const requiresPaymentForBooking = data.requires_payment !== false;
           const shouldSyncPayment = Boolean(
-            requiresPaymentForBooking &&
-              !data.pago_realizado &&
+            !data.pago_realizado &&
               !paymentSyncAttempted &&
               data.stripe_checkout_session_id
           );
 
           if (
             (paymentStatus === 'success' || shouldSyncPayment) &&
-            requiresPaymentForBooking &&
             !data.pago_realizado &&
             !paymentSyncAttempted
           ) {
@@ -480,36 +473,6 @@ export default function ContractPage() {
 
     fetchBooking();
   }, [id, token, paymentStatus]);
-
-  const handleGeneratePaymentLink = async () => {
-    if (!booking || creatingPaymentLink) return;
-    if (!requiresPayment) return;
-    setCreatingPaymentLink(true);
-    setPaymentLinkError(null);
-
-    try {
-      const response = await fetch('/api/stripe/create-checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bookingId: booking.id, token }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error || copy.payment.generateError);
-      }
-
-      if (!data?.url) {
-        throw new Error(copy.payment.generateError);
-      }
-
-      setBooking((prev) => (prev ? { ...prev, stripe_payment_link: data.url } : prev));
-    } catch (err: unknown) {
-      setPaymentLinkError(getErrorMessage(err) || copy.payment.generateError);
-    } finally {
-      setCreatingPaymentLink(false);
-    }
-  };
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -562,6 +525,7 @@ export default function ContractPage() {
   useEffect(() => {
     const expireIfNeeded = async () => {
       if (!booking) return;
+      if (!shouldAutoExpireBooking(booking)) return;
       if (booking.pago_realizado || booking.acuerdo_firmado) return;
       if (booking.expirado || booking.estado === 'expirada') return;
       if (!booking.expiracion) return;
@@ -1037,41 +1001,12 @@ export default function ContractPage() {
             </div>
           </section>
 
-          <section>
-            <h2 className="text-lg font-bold text-gray-900 mb-4 border-b pb-2 flex items-center gap-2">
-              <CreditCard size={20} className="text-blue-600" />
-              {copy.sections.payment}
-            </h2>
-            {!requiresPayment ? (
-              <div className="bg-emerald-50 border-2 border-emerald-200 rounded-xl p-4 flex items-center gap-3">
-                <div className="bg-emerald-100 p-2 rounded-lg">
-                  <CheckCircle size={24} className="text-emerald-600" />
-                </div>
-                <div>
-                  <div className="font-bold text-emerald-700">
-                    {lang === 'es' ? 'Pago no obligatorio' : 'Payment not required'}
-                  </div>
-                  <div className="text-sm text-emerald-600">
-                    {lang === 'es'
-                      ? 'Este partner tiene autorización para confirmar sin pago previo.'
-                      : 'This partner is authorized to confirm without upfront payment.'}
-                  </div>
-                </div>
-              </div>
-            ) : booking.estado === 'expirada' ? (
-              <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4 text-center">
-                <div className="text-red-700 font-medium">
-                  {lang === 'es'
-                    ? '⏰ Esta reserva ha expirado por falta de pago'
-                    : '⏰ This reservation has expired due to non-payment'}
-                </div>
-                <div className="text-sm text-red-600 mt-1">
-                  {lang === 'es'
-                    ? 'El enlace ha expirado. Solicita un nuevo enlace de reserva para continuar.'
-                    : 'This link has expired. Please request a new booking link to continue.'}
-                </div>
-              </div>
-            ) : booking.pago_realizado ? (
+          {booking.pago_realizado ? (
+            <section>
+              <h2 className="text-lg font-bold text-gray-900 mb-4 border-b pb-2 flex items-center gap-2">
+                <CreditCard size={20} className="text-blue-600" />
+                {copy.sections.payment}
+              </h2>
               <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4 flex items-center gap-3">
                 <div className="bg-green-100 p-2 rounded-lg">
                   <CheckCircle size={24} className="text-green-600" />
@@ -1086,51 +1021,8 @@ export default function ContractPage() {
                   </div>
                 </div>
               </div>
-            ) : booking.stripe_payment_link ? (
-              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <div className="font-bold text-blue-900 mb-1">{copy.payment.pending}</div>
-                    <div className="text-sm text-blue-700">
-                      {copy.labels.totalToPay}: €
-                      {totalToPay.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
-                    </div>
-                  </div>
-                  <div className="bg-blue-100 p-2 rounded-lg">
-                    <CreditCard size={24} className="text-blue-600" />
-                  </div>
-                </div>
-                <a
-                  href={booking.stripe_payment_link}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-primary w-full py-3"
-                >
-                  <ExternalLink size={20} />
-                  {copy.payment.payNow}
-                </a>
-                <p className="text-xs text-blue-600 mt-2 text-center">{copy.payment.redirectNote}</p>
-              </div>
-            ) : (
-              <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4 text-center">
-                <div className="text-yellow-700 font-medium">{copy.payment.unavailableTitle}</div>
-                <div className="text-sm text-yellow-600 mt-1">{copy.payment.unavailableNote}</div>
-                {!booking.expirado && (
-                  <button
-                    type="button"
-                    onClick={handleGeneratePaymentLink}
-                    disabled={creatingPaymentLink}
-                    className="btn-primary w-full mt-4 py-3 disabled:opacity-70 disabled:cursor-not-allowed"
-                  >
-                    {creatingPaymentLink ? copy.payment.generating : copy.payment.generateLink}
-                  </button>
-                )}
-                {paymentLinkError && (
-                  <div className="text-xs text-red-600 mt-2">{paymentLinkError}</div>
-                )}
-              </div>
-            )}
-          </section>
+            </section>
+          ) : null}
 
           <section>
             <h2 className="text-lg font-bold text-gray-900 mb-4 border-b pb-2 flex items-center gap-2">
