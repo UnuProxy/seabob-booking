@@ -426,16 +426,6 @@ export default function BrokerReservasPage() {
     if (booking.estado === 'cancelada' || booking.estado === 'expirada') return;
     setChargingBookingId(booking.id);
     try {
-      if (booking.stripe_payment_link) {
-        const copied = await copyToClipboard(booking.stripe_payment_link);
-        if (copied) {
-          showFeedback('success', 'Enlace de pago copiado');
-        } else {
-          window.prompt('Copia manualmente el enlace de pago:', booking.stripe_payment_link);
-        }
-        return;
-      }
-
       const { token } = await ensureContractLink(booking);
       const res = await fetch('/api/stripe/create-checkout', {
         method: 'POST',
