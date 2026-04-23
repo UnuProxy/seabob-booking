@@ -49,6 +49,31 @@ function getDate(dateValue: unknown): Date {
   return new Date();
 }
 
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', 'true');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return copied;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function BrokerBookingActionsMenu({
   isOpen,
   onToggle,
@@ -374,8 +399,12 @@ export default function BrokerReservasPage() {
   const copyContractLink = async (booking: Booking) => {
     try {
       const { url } = await ensureContractLink(booking);
-      await navigator.clipboard.writeText(url);
-      showFeedback('success', 'Enlace del contrato copiado');
+      const copied = await copyToClipboard(url);
+      if (copied) {
+        showFeedback('success', 'Enlace del contrato copiado');
+      } else {
+        window.prompt('Copia manualmente el enlace del contrato:', url);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo generar el enlace del contrato';
       showFeedback('error', message);
@@ -398,8 +427,12 @@ export default function BrokerReservasPage() {
     setChargingBookingId(booking.id);
     try {
       if (booking.stripe_payment_link) {
-        await navigator.clipboard.writeText(booking.stripe_payment_link);
-        showFeedback('success', 'Enlace de pago copiado');
+        const copied = await copyToClipboard(booking.stripe_payment_link);
+        if (copied) {
+          showFeedback('success', 'Enlace de pago copiado');
+        } else {
+          window.prompt('Copia manualmente el enlace de pago:', booking.stripe_payment_link);
+        }
         return;
       }
 
@@ -426,8 +459,12 @@ export default function BrokerReservasPage() {
           stripe_payment_link: data.url,
           stripe_checkout_session_id: data.sessionId,
         });
-        await navigator.clipboard.writeText(data.url);
-        showFeedback('success', 'Enlace de pago generado y copiado');
+        const copied = await copyToClipboard(data.url);
+        if (copied) {
+          showFeedback('success', 'Enlace de pago generado y copiado');
+        } else {
+          window.prompt('Copia manualmente el enlace de pago:', data.url);
+        }
       } else {
         showFeedback('error', 'No se recibió enlace de pago');
       }

@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { collection, getDocs, query, where, serverTimestamp, doc, getDoc, increment, runTransaction } from 'firebase/firestore';
+import { collection, getDocs, query, where, serverTimestamp, doc, getDoc, increment, runTransaction, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import { Product, BookingItem, DailyStock, User as AppUser } from '@/types';
+import { Product, BookingItem, DailyStock, User as AppUser, PaymentMethod } from '@/types';
 import { BOOKING_FORM_DRAFT_KEY, clearBookingDraftStorage } from '@/lib/bookingDraft';
 import { getTimedBookingExpiration } from '@/lib/bookingExpiration';
 import {
@@ -59,13 +59,15 @@ interface BookingFormDraft {
   dockingNumber: string;
   deliveryTime: string;
   notes: string;
-  skipPayment: boolean;
+  adminPaymentStatus?: 'pending' | 'paid';
+  adminPaymentMethod?: PaymentMethod;
   partnerType: 'directo' | 'broker' | 'agency' | 'colaborador';
   partnerId: string;
 }
 
 export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: BookingFormProps) {
   const { user } = useAuthStore();
+  const isAdmin = user?.rol === 'admin';
   const formatPrice = (amount: number) => amount.toLocaleString('es-ES', { maximumFractionDigits: 0 });
   const getErrorCode = (error: unknown) =>
     typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code || '') : '';
@@ -91,6 +93,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const isPastCutoff = now.getHours() >= 17;
   const minDate = isPastCutoff ? addDays(now, 1) : now;
   const minDateStr = format(minDate, 'yyyy-MM-dd');
+  const todayDateStr = format(new Date(), 'yyyy-MM-dd');
   const [startDate, setStartDate] = useState(minDateStr);
   const [endDate, setEndDate] = useState(minDateStr); // Default same day (1 day service)
   const [isMultiDay, setIsMultiDay] = useState(false);
@@ -120,9 +123,11 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const [deliveryTime, setDeliveryTime] = useState('09:00'); // Default 9 AM
   
   const [notes, setNotes] = useState('');
-  const [skipPayment, setSkipPayment] = useState(false);
+  const [adminPaymentStatus, setAdminPaymentStatus] = useState<'pending' | 'paid'>('pending');
+  const [adminPaymentMethod, setAdminPaymentMethod] = useState<PaymentMethod>('tarjeta');
   const [partnerType, setPartnerType] = useState<'directo' | 'broker' | 'agency' | 'colaborador'>('directo');
   const [partnerId, setPartnerId] = useState('');
+  const isAdminBackdatedBooking = isAdmin && startDate < todayDateStr;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -164,7 +169,15 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       setDockingNumber(typeof draft.dockingNumber === 'string' ? draft.dockingNumber : '');
       setDeliveryTime(typeof draft.deliveryTime === 'string' ? draft.deliveryTime : '09:00');
       setNotes(typeof draft.notes === 'string' ? draft.notes : '');
-      setSkipPayment(Boolean(draft.skipPayment));
+      setAdminPaymentStatus(draft.adminPaymentStatus === 'paid' ? 'paid' : 'pending');
+      setAdminPaymentMethod(
+        draft.adminPaymentMethod === 'stripe' ||
+          draft.adminPaymentMethod === 'transferencia' ||
+          draft.adminPaymentMethod === 'tarjeta' ||
+          draft.adminPaymentMethod === 'otro'
+          ? draft.adminPaymentMethod
+          : 'tarjeta'
+      );
       setPartnerType(
         draft.partnerType === 'broker' ||
           draft.partnerType === 'agency' ||
@@ -203,7 +216,8 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       dockingNumber,
       deliveryTime,
       notes,
-      skipPayment,
+      adminPaymentStatus,
+      adminPaymentMethod,
       partnerType,
       partnerId,
     };
@@ -225,13 +239,14 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
     dockingNumber,
     draftHydrated,
     endDate,
+    adminPaymentMethod,
+    adminPaymentStatus,
     isMultiDay,
     isProductPickerOpen,
     items,
     notes,
     partnerId,
     partnerType,
-    skipPayment,
     startDate,
     successData,
   ]);
@@ -294,6 +309,20 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
     const checkStock = async () => {
       if (!startDate || !endDate || products.length === 0) return;
 
+      if (isAdminBackdatedBooking) {
+        const stockMap: Record<string, { available: number; isOutOfStock: boolean; isLowStock: boolean }> = {};
+        products.forEach((product) => {
+          if (!product.id) return;
+          stockMap[product.id] = {
+            available: Number.MAX_SAFE_INTEGER,
+            isOutOfStock: false,
+            isLowStock: false,
+          };
+        });
+        setProductStock(stockMap);
+        return;
+      }
+
       try {
         const start = new Date(startDate);
         const end = new Date(endDate);
@@ -337,7 +366,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
     };
 
     checkStock();
-  }, [startDate, endDate, products]);
+  }, [endDate, isAdminBackdatedBooking, products, startDate]);
 
   useEffect(() => {
     if (!draftHydrated || hasDraftData || !initialSelectedProductId || items.length > 0 || hasAppliedInitialProduct) return;
@@ -481,7 +510,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
     }
 
     if (step === 2) {
-      if (startDate < minDateStr) {
+      if (!isAdmin && startDate < minDateStr) {
         setError('No se pueden crear reservas para hoy después de las 17:00. Selecciona otra fecha.');
         return false;
       }
@@ -535,7 +564,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       setError('El nombre del cliente es obligatorio');
       return;
     }
-    if (startDate < minDateStr) {
+    if (!isAdmin && startDate < minDateStr) {
       setError('No se pueden crear reservas para hoy después de las 17:00. Selecciona otra fecha.');
       return;
     }
@@ -549,17 +578,19 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
     }
 
     // Validate stock availability
-    for (const item of items) {
-      const stockInfo = productStock[item.producto_id];
-      if (stockInfo?.isOutOfStock) {
-        const product = products.find(p => p.id === item.producto_id);
-        setError(`❌ ${product?.nombre || 'El producto seleccionado'} no tiene stock disponible para las fechas seleccionadas. Por favor, elige otro producto o cambia las fechas.`);
-        return;
-      }
-      if (stockInfo && item.cantidad > stockInfo.available) {
-        const product = products.find(p => p.id === item.producto_id);
-        setError(`❌ ${product?.nombre || 'El producto seleccionado'} solo tiene ${stockInfo.available} unidad(es) disponible(s), pero solicitaste ${item.cantidad}. Reduce la cantidad o cambia las fechas.`);
-        return;
+    if (!isAdminBackdatedBooking) {
+      for (const item of items) {
+        const stockInfo = productStock[item.producto_id];
+        if (stockInfo?.isOutOfStock) {
+          const product = products.find(p => p.id === item.producto_id);
+          setError(`❌ ${product?.nombre || 'El producto seleccionado'} no tiene stock disponible para las fechas seleccionadas. Por favor, elige otro producto o cambia las fechas.`);
+          return;
+        }
+        if (stockInfo && item.cantidad > stockInfo.available) {
+          const product = products.find(p => p.id === item.producto_id);
+          setError(`❌ ${product?.nombre || 'El producto seleccionado'} solo tiene ${stockInfo.available} unidad(es) disponible(s), pero solicitaste ${item.cantidad}. Reduce la cantidad o cambia las fechas.`);
+          return;
+        }
       }
     }
 
@@ -643,10 +674,12 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         (user.rol === 'broker' || user.rol === 'agency')
           ? Boolean(user.allow_booking_without_payment)
           : Boolean(assignedPartner?.allow_booking_without_payment);
-      const bypassPaymentRequirement = (user.rol === 'admin' && skipPayment) || partnerAllowsBookingWithoutPayment;
+      const adminMarkedPaid = user.rol === 'admin' && adminPaymentStatus === 'paid';
+      const bypassPaymentRequirement =
+        user.rol === 'admin' ? adminMarkedPaid : partnerAllowsBookingWithoutPayment;
 
       let expiracion: Date | null = null;
-      if (!bypassPaymentRequirement && shouldGenerateAccessLink) {
+      if (!bypassPaymentRequirement && shouldGenerateAccessLink && !isAdminBackdatedBooking) {
         const expirationOwnerRole =
           user.rol === 'broker' || user.rol === 'agency'
             ? user.rol
@@ -676,8 +709,9 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         delivery_total: deliveryTotal,
         nautical_license_required: nauticalLicenseRequired,
         deposito_total: 0,
-        estado: user.rol === 'admin' && skipPayment ? 'confirmada' : 'pendiente',
+        estado: user.rol === 'admin' && adminMarkedPaid ? 'confirmada' : 'pendiente',
         acuerdo_firmado: false,
+        ...(user.rol === 'admin' && adminMarkedPaid ? { confirmado_en: serverTimestamp() } : {}),
         
         // Commission tracking (for broker/agency bookings)
         comision_total: comisionTotal,
@@ -693,8 +727,14 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         // Public Contract
         firma_cliente: null,
         terminos_aceptados: false,
-        pago_realizado: false,
-        requires_payment: !bypassPaymentRequirement,
+        pago_realizado: adminMarkedPaid,
+        ...(user.rol === 'admin' && adminMarkedPaid
+          ? {
+              pago_realizado_en: serverTimestamp(),
+              pago_metodo: adminPaymentMethod,
+            }
+          : {}),
+        requires_payment: user.rol === 'admin' ? !adminMarkedPaid : !bypassPaymentRequirement,
         
         // Reservation hold/expiration
         expiracion: expiracion,
@@ -739,40 +779,45 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       };
 
       try {
-        const requirements = stockRequirements();
-        await runTransaction(db, async (tx) => {
-          for (const req of requirements) {
-            const stockRef = doc(db, 'daily_stock', `${req.dateStr}_${req.productId}`);
-            const stockSnap = await tx.get(stockRef);
-            const stockData = stockSnap.exists() ? (stockSnap.data() as DailyStock) : undefined;
-            const available = (stockData?.cantidad_disponible || 0) - (stockData?.cantidad_reservada || 0);
-            if (available <= 0) {
-              const productName = products.find(p => p.id === req.productId)?.nombre || 'El producto seleccionado';
-              throw new Error(`STOCK:${productName}:0:${req.quantity}`);
+        const shouldReserveStock = !isAdminBackdatedBooking;
+        if (shouldReserveStock) {
+          const requirements = stockRequirements();
+          await runTransaction(db, async (tx) => {
+            for (const req of requirements) {
+              const stockRef = doc(db, 'daily_stock', `${req.dateStr}_${req.productId}`);
+              const stockSnap = await tx.get(stockRef);
+              const stockData = stockSnap.exists() ? (stockSnap.data() as DailyStock) : undefined;
+              const available = (stockData?.cantidad_disponible || 0) - (stockData?.cantidad_reservada || 0);
+              if (available <= 0) {
+                const productName = products.find(p => p.id === req.productId)?.nombre || 'El producto seleccionado';
+                throw new Error(`STOCK:${productName}:0:${req.quantity}`);
+              }
+              if (req.quantity > available) {
+                const productName = products.find(p => p.id === req.productId)?.nombre || 'El producto seleccionado';
+                throw new Error(`STOCK:${productName}:${available}:${req.quantity}`);
+              }
             }
-            if (req.quantity > available) {
-              const productName = products.find(p => p.id === req.productId)?.nombre || 'El producto seleccionado';
-              throw new Error(`STOCK:${productName}:${available}:${req.quantity}`);
+
+            tx.set(bookingRef, bookingData);
+
+            for (const req of requirements) {
+              const stockRef = doc(db, 'daily_stock', `${req.dateStr}_${req.productId}`);
+              tx.set(
+                stockRef,
+                {
+                  fecha: req.dateStr,
+                  producto_id: req.productId,
+                  cantidad_reservada: increment(req.quantity),
+                  actualizado_por: user.id,
+                  timestamp: serverTimestamp(),
+                },
+                { merge: true }
+              );
             }
-          }
-
-          tx.set(bookingRef, bookingData);
-
-          for (const req of requirements) {
-            const stockRef = doc(db, 'daily_stock', `${req.dateStr}_${req.productId}`);
-            tx.set(
-              stockRef,
-              {
-                fecha: req.dateStr,
-                producto_id: req.productId,
-                cantidad_reservada: increment(req.quantity),
-                actualizado_por: user.id,
-                timestamp: serverTimestamp(),
-              },
-              { merge: true }
-            );
-          }
-        });
+          });
+        } else {
+          await setDoc(bookingRef, bookingData);
+        }
       } catch (stockError: unknown) {
         const stockErrorMessage = getErrorMessage(stockError);
         if (stockErrorMessage.startsWith('STOCK:')) {
@@ -794,7 +839,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       }
 
       let paymentUrl: string | undefined;
-      if (!bypassPaymentRequirement && token) {
+      if (!bypassPaymentRequirement && token && !isAdminBackdatedBooking) {
         // 3. Generate Stripe payment link
         try {
           const response = await fetch('/api/stripe/create-checkout', {
@@ -1071,16 +1116,53 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                   <section className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-6">
                     <h3 className="text-xl font-bold text-slate-900">Pago</h3>
                     <div className="mt-4 space-y-4">
-                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                        <input
-                          id="skipPayment"
-                          type="checkbox"
-                          checked={skipPayment}
-                          onChange={(event) => setSkipPayment(event.target.checked)}
-                          className="h-5 w-5 rounded border-gray-300 text-slate-900 focus:ring-slate-900/30"
-                        />
-                        <span className="text-base font-semibold text-slate-900">Sin pago ahora</span>
-                      </label>
+                      <div>
+                        <label className="mb-2 block text-sm font-semibold text-slate-700">Estado del pago</label>
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                            <input
+                              type="radio"
+                              name="adminPaymentStatus"
+                              value="pending"
+                              checked={adminPaymentStatus === 'pending'}
+                              onChange={() => setAdminPaymentStatus('pending')}
+                              className="h-5 w-5 border-gray-300 text-slate-900 focus:ring-slate-900/30"
+                            />
+                            <span className="text-base font-semibold text-slate-900">Pendiente de pago</span>
+                          </label>
+                          <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                            <input
+                              type="radio"
+                              name="adminPaymentStatus"
+                              value="paid"
+                              checked={adminPaymentStatus === 'paid'}
+                              onChange={() => setAdminPaymentStatus('paid')}
+                              className="h-5 w-5 border-gray-300 text-slate-900 focus:ring-slate-900/30"
+                            />
+                            <span className="text-base font-semibold text-slate-900">Ya pagada</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {adminPaymentStatus === 'paid' ? (
+                        <div>
+                          <label className="mb-2 block text-sm font-semibold text-slate-700">Metodo de pago</label>
+                          <select
+                            value={adminPaymentMethod}
+                            onChange={(event) => setAdminPaymentMethod(event.target.value as PaymentMethod)}
+                            className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                          >
+                            <option value="tarjeta">Tarjeta</option>
+                            <option value="transferencia">Transferencia</option>
+                            <option value="stripe">Stripe</option>
+                            <option value="otro">Otro</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                          La reserva se guardara como pendiente de pago para que puedas cobrarla o actualizarla despues.
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                         <div>
@@ -1135,10 +1217,10 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                     <input
                       type="date"
                       value={startDate}
-                      min={minDateStr}
+                      min={isAdmin ? undefined : minDateStr}
                       onChange={(e) => {
-                        const nextDate = e.target.value || minDateStr;
-                        const safeDate = nextDate < minDateStr ? minDateStr : nextDate;
+                        const nextDate = e.target.value || (isAdmin ? todayDateStr : minDateStr);
+                        const safeDate = isAdmin || nextDate >= minDateStr ? nextDate : minDateStr;
                         setStartDate(safeDate);
                         setEndDate(safeDate);
                       }}
@@ -1164,7 +1246,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                       <input
                         type="date"
                         value={endDate}
-                        min={startDate < minDateStr ? minDateStr : startDate}
+                        min={isAdmin ? startDate : startDate < minDateStr ? minDateStr : startDate}
                         onChange={(e) => {
                           const nextDate = e.target.value || startDate;
                           setEndDate(nextDate < startDate ? startDate : nextDate);
