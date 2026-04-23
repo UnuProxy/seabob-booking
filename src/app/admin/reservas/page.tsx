@@ -63,6 +63,7 @@ function AdminBookingActionsMenu({
   onClose,
   onViewDetails,
   onPayment,
+  onCopyPayment,
   onCopyContract,
   onOpenContract,
   onCancel,
@@ -73,11 +74,13 @@ function AdminBookingActionsMenu({
   onClose: () => void;
   onViewDetails: () => void;
   onPayment: () => void;
+  onCopyPayment: () => void;
   onCopyContract: () => void;
   onOpenContract: () => void;
   onCancel: () => void;
 }) {
   const canCancel = booking.estado !== 'cancelada';
+  const canGeneratePaymentLink = !booking.pago_realizado && booking.estado !== 'cancelada' && booking.estado !== 'expirada';
   const rootRef = useRef<HTMLDivElement | null>(null);
   const desktopMenuRef = useRef<HTMLDivElement | null>(null);
   const [openUpward, setOpenUpward] = useState(false);
@@ -194,6 +197,20 @@ function AdminBookingActionsMenu({
               <Share2 className="h-4 w-4 opacity-70" />
               Copiar enlace
             </button>
+            {canGeneratePaymentLink ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => {
+                  onClose();
+                  onCopyPayment();
+                }}
+              >
+                <CreditCard className="h-4 w-4 opacity-70" />
+                Copiar enlace pago
+              </button>
+            ) : null}
             {canCancel ? (
               <button
                 type="button"
@@ -266,6 +283,20 @@ function AdminBookingActionsMenu({
               <Share2 className="h-4 w-4 opacity-70" />
               Copiar enlace
             </button>
+            {canGeneratePaymentLink ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => {
+                  onClose();
+                  onCopyPayment();
+                }}
+              >
+                <CreditCard className="h-4 w-4 opacity-70" />
+                Copiar enlace pago
+              </button>
+            ) : null}
             {canCancel ? (
               <button
                 type="button"
@@ -580,6 +611,58 @@ export default function BookingsPage() {
       alert('Enlace del contrato copiado al portapapeles');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo generar el enlace del contrato';
+      alert(message);
+    }
+  };
+
+  const ensurePaymentLink = async (booking: Booking) => {
+    if (booking.pago_realizado) {
+      throw new Error('La reserva ya esta pagada.');
+    }
+
+    if (booking.estado === 'cancelada' || booking.estado === 'expirada') {
+      throw new Error('No se puede generar un cobro para esta reserva.');
+    }
+
+    if (booking.stripe_payment_link) {
+      return booking.stripe_payment_link;
+    }
+
+    const { token } = await ensureContractLink(booking);
+    const response = await fetch('/api/stripe/create-checkout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        bookingId: booking.id,
+        token,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok || typeof data?.url !== 'string' || !data.url) {
+      throw new Error(
+        typeof data?.error === 'string' ? data.error : 'No se pudo generar el enlace de pago'
+      );
+    }
+
+    patchBooking(booking.id, {
+      token_acceso: token,
+      stripe_payment_link: data.url,
+      stripe_checkout_session_id: typeof data?.sessionId === 'string' ? data.sessionId : booking.stripe_checkout_session_id,
+    });
+
+    return data.url as string;
+  };
+
+  const copyPaymentLink = async (booking: Booking) => {
+    try {
+      const url = await ensurePaymentLink(booking);
+      await navigator.clipboard.writeText(url);
+      alert('Enlace de pago copiado al portapapeles');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo generar el enlace de pago';
       alert(message);
     }
   };
@@ -1264,6 +1347,7 @@ export default function BookingsPage() {
                             onClose={() => setOpenActionMenuId(null)}
                             onViewDetails={() => setViewingBooking(booking)}
                             onPayment={() => setPaymentManaging(booking)}
+                            onCopyPayment={() => void copyPaymentLink(booking)}
                             onCopyContract={() => void copyContractLink(booking)}
                             onOpenContract={() => openContractTab(booking)}
                             onCancel={() => void handleCancelBooking(booking)}
@@ -1448,7 +1532,7 @@ export default function BookingsPage() {
                 const agentName = getAgentName(booking);
                 const agentType = getAgentType(booking);
                 const highlightAgent = agentType === 'Broker' || agentType === 'Agencia';
-                const totalUnits = booking.items.reduce((sum, item) => sum + (item.cantidad || 0), 0);
+                const productsSummary = getProductsSummary(booking);
                 const isExpired = isExpiredBooking(booking);
                 const paymentBadge = getPaymentBadgeData(booking);
 
@@ -1501,7 +1585,7 @@ export default function BookingsPage() {
                             {booking.hora_entrega ? ` · ${booking.hora_entrega}` : ''}
                           </div>
                           <div className="truncate text-sm text-slate-500">
-                            {agentName} · {totalUnits} uds
+                            {agentName} · {productsSummary}
                           </div>
                           {isToday && (
                             <span className="inline-flex items-center gap-1 rounded-md bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">
@@ -1547,6 +1631,7 @@ export default function BookingsPage() {
                           onClose={() => setOpenActionMenuId(null)}
                           onViewDetails={() => setViewingBooking(booking)}
                           onPayment={() => setPaymentManaging(booking)}
+                          onCopyPayment={() => void copyPaymentLink(booking)}
                           onCopyContract={() => void copyContractLink(booking)}
                           onOpenContract={() => openContractTab(booking)}
                           onCancel={() => void handleCancelBooking(booking)}
@@ -1676,6 +1761,60 @@ function BookingDetailsModal({
 
   const deliveryLocationLabel =
     getDeliveryLocationLabel(booking.ubicacion_entrega, booking.ubicacion_entrega_detalle) || 'No especificado';
+  const [clientName, setClientName] = useState(booking.cliente.nombre || '');
+  const [clientEmail, setClientEmail] = useState(booking.cliente.email || '');
+  const [clientPhone, setClientPhone] = useState(booking.cliente.telefono || '');
+  const [savingClient, setSavingClient] = useState(false);
+  const [clientFeedback, setClientFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    setClientName(booking.cliente.nombre || '');
+    setClientEmail(booking.cliente.email || '');
+    setClientPhone(booking.cliente.telefono || '');
+    setClientFeedback(null);
+  }, [booking]);
+
+  const hasClientChanges =
+    clientName !== (booking.cliente.nombre || '') ||
+    clientEmail !== (booking.cliente.email || '') ||
+    clientPhone !== (booking.cliente.telefono || '');
+
+  const saveClientDetails = async () => {
+    const nextName = clientName.trim();
+    const nextEmail = clientEmail.trim();
+    const nextPhone = clientPhone.trim();
+
+    if (!nextName) {
+      setClientFeedback({ type: 'error', message: 'El nombre del cliente es obligatorio.' });
+      return;
+    }
+
+    setSavingClient(true);
+    setClientFeedback(null);
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        cliente: {
+          ...booking.cliente,
+          nombre: nextName,
+          email: nextEmail,
+          telefono: nextPhone,
+          whatsapp: nextPhone,
+        },
+        updated_at: serverTimestamp(),
+      });
+
+      setClientName(nextName);
+      setClientEmail(nextEmail);
+      setClientPhone(nextPhone);
+      setClientFeedback({ type: 'success', message: 'Cliente actualizado correctamente.' });
+    } catch (error) {
+      console.error('Error updating booking client:', error);
+      setClientFeedback({ type: 'error', message: 'No se pudo guardar el cliente.' });
+    } finally {
+      setSavingClient(false);
+    }
+  };
 
   const copyDatesAndDelivery = async () => {
     const text = [
@@ -1716,23 +1855,71 @@ function BookingDetailsModal({
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
           {/* Client Info */}
           <section>
-            <h3 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-              <UserIcon size={20} className="text-blue-600" />
-              Cliente
-            </h3>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                <UserIcon size={20} className="text-blue-600" />
+                Cliente
+              </h3>
+              <button
+                type="button"
+                onClick={() => void saveClientDetails()}
+                disabled={!hasClientChanges || savingClient}
+                className="btn-outline text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingClient ? 'Guardando...' : 'Guardar cliente'}
+              </button>
+            </div>
             <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-2 gap-4">
               <div>
                 <span className="text-xs text-gray-500 uppercase font-semibold">Nombre</span>
-                <div className="text-gray-900 font-medium">{booking.cliente.nombre}</div>
+                <input
+                  type="text"
+                  value={clientName}
+                  onChange={(event) => {
+                    setClientName(event.target.value);
+                    if (clientFeedback) setClientFeedback(null);
+                  }}
+                  className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-900"
+                />
               </div>
               <div>
                 <span className="text-xs text-gray-500 uppercase font-semibold">Email</span>
-                <div className="text-gray-900 font-medium">{booking.cliente.email}</div>
+                <input
+                  type="email"
+                  value={clientEmail}
+                  onChange={(event) => {
+                    setClientEmail(event.target.value);
+                    if (clientFeedback) setClientFeedback(null);
+                  }}
+                  className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-900"
+                  placeholder="Sin email"
+                />
               </div>
               <div>
                 <span className="text-xs text-gray-500 uppercase font-semibold">Teléfono</span>
-                <div className="text-gray-900 font-medium">{booking.cliente.telefono || 'N/A'}</div>
+                <input
+                  type="text"
+                  value={clientPhone}
+                  onChange={(event) => {
+                    setClientPhone(event.target.value);
+                    if (clientFeedback) setClientFeedback(null);
+                  }}
+                  className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-900"
+                  placeholder="Sin teléfono"
+                />
               </div>
+              {clientFeedback && (
+                <div
+                  className={clsx(
+                    'col-span-2 rounded-lg border px-3 py-2 text-sm',
+                    clientFeedback.type === 'success'
+                      ? 'border-green-200 bg-green-50 text-green-700'
+                      : 'border-red-200 bg-red-50 text-red-700'
+                  )}
+                >
+                  {clientFeedback.message}
+                </div>
+              )}
             </div>
           </section>
 
