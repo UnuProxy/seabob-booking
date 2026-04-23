@@ -653,10 +653,6 @@ export default function BookingsPage() {
       throw new Error('No se puede generar un cobro para esta reserva.');
     }
 
-    if (booking.stripe_payment_link) {
-      return booking.stripe_payment_link;
-    }
-
     const { token } = await ensureContractLink(booking);
     const response = await fetch('/api/stripe/create-checkout', {
       method: 'POST',
@@ -1803,12 +1799,17 @@ function BookingDetailsModal({
   const [clientPhone, setClientPhone] = useState(booking.cliente.telefono || '');
   const [savingClient, setSavingClient] = useState(false);
   const [clientFeedback, setClientFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [adminNote, setAdminNote] = useState(booking.notas || '');
+  const [savingAdminNote, setSavingAdminNote] = useState(false);
+  const [adminNoteFeedback, setAdminNoteFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     setClientName(booking.cliente.nombre || '');
     setClientEmail(booking.cliente.email || '');
     setClientPhone(booking.cliente.telefono || '');
     setClientFeedback(null);
+    setAdminNote(booking.notas || '');
+    setAdminNoteFeedback(null);
   }, [booking]);
 
   const hasClientChanges =
@@ -1850,6 +1851,33 @@ function BookingDetailsModal({
       setClientFeedback({ type: 'error', message: 'No se pudo guardar el cliente.' });
     } finally {
       setSavingClient(false);
+    }
+  };
+
+  const hasAdminNoteChanges = adminNote !== (booking.notas || '');
+
+  const saveAdminNote = async () => {
+    const nextNote = adminNote.trim();
+
+    setSavingAdminNote(true);
+    setAdminNoteFeedback(null);
+
+    try {
+      await updateDoc(doc(db, 'bookings', booking.id), {
+        notas: nextNote,
+        updated_at: serverTimestamp(),
+      });
+
+      setAdminNote(nextNote);
+      setAdminNoteFeedback({
+        type: 'success',
+        message: nextNote ? 'Nota guardada correctamente.' : 'Nota eliminada correctamente.',
+      });
+    } catch (error) {
+      console.error('Error updating admin booking note:', error);
+      setAdminNoteFeedback({ type: 'error', message: 'No se pudo guardar la nota.' });
+    } finally {
+      setSavingAdminNote(false);
     }
   };
 
@@ -2240,14 +2268,43 @@ function BookingDetailsModal({
           )}
 
           {/* Notes */}
-          {booking.notas && (
-            <section>
-              <h3 className="text-lg font-bold text-gray-900 mb-3">Notas</h3>
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-gray-700">{booking.notas}</p>
-              </div>
-            </section>
-          )}
+          <section>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-lg font-bold text-gray-900">Notas internas del admin</h3>
+              <button
+                type="button"
+                onClick={() => void saveAdminNote()}
+                disabled={!hasAdminNoteChanges || savingAdminNote}
+                className="btn-outline text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {savingAdminNote ? 'Guardando...' : 'Guardar nota'}
+              </button>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+              <textarea
+                value={adminNote}
+                onChange={(event) => {
+                  setAdminNote(event.target.value);
+                  if (adminNoteFeedback) setAdminNoteFeedback(null);
+                }}
+                rows={4}
+                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-900"
+                placeholder="Añade notas internas visibles para el equipo admin..."
+              />
+              {adminNoteFeedback ? (
+                <div
+                  className={clsx(
+                    'rounded-lg border px-3 py-2 text-sm',
+                    adminNoteFeedback.type === 'success'
+                      ? 'border-green-200 bg-green-50 text-green-700'
+                      : 'border-red-200 bg-red-50 text-red-700'
+                  )}
+                >
+                  {adminNoteFeedback.message}
+                </div>
+              ) : null}
+            </div>
+          </section>
 
           {booking.partner_internal_note && (
             <section>

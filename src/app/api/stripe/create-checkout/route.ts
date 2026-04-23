@@ -13,6 +13,25 @@ const stripe = process.env.STRIPE_SECRET_KEY
     })
   : null;
 
+function getServiceDateLabel(startDate: string, endDate: string) {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return startDate === endDate ? startDate : `${startDate} - ${endDate}`;
+  }
+
+  const formatter = new Intl.DateTimeFormat('es-ES', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
+  return startDate === endDate
+    ? formatter.format(start)
+    : `${formatter.format(start)} - ${formatter.format(end)}`;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Check if Stripe is configured
@@ -89,6 +108,26 @@ export async function POST(request: NextRequest) {
     const resolvedName = booking.cliente?.nombre;
     const normalizedCustomerEmail =
       resolvedEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolvedEmail) ? resolvedEmail : null;
+    const primaryItem = booking.items?.[0];
+    const primaryProduct = primaryItem?.producto_id ? productsById[primaryItem.producto_id] : null;
+    const additionalProductCount = Math.max(0, (booking.items?.length || 0) - 1);
+    const productName = primaryItem?.producto_nombre || primaryProduct?.nombre || `Reserva SeaBob #${bookingId}`;
+    const checkoutTitle = additionalProductCount > 0 ? `${productName} + ${additionalProductCount} mas` : productName;
+    const productImage =
+      primaryProduct?.imagen_url?.trim() && /^https?:\/\//i.test(primaryProduct.imagen_url.trim())
+        ? primaryProduct.imagen_url.trim()
+        : null;
+    const bookingDateLabel = getServiceDateLabel(booking.fecha_inicio, booking.fecha_fin);
+    const quantitySummary = booking.items
+      .slice(0, 2)
+      .map((item) => {
+        const itemName = item.producto_nombre || productsById[item.producto_id]?.nombre || 'Producto';
+        return `x${item.cantidad} ${itemName}`;
+      })
+      .join(' · ');
+    const checkoutDescription = [bookingDateLabel ? `Fecha: ${bookingDateLabel}` : '', quantitySummary]
+      .filter(Boolean)
+      .join(' | ');
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ||
       request.headers.get('origin') ||
@@ -124,8 +163,9 @@ export async function POST(request: NextRequest) {
         price_data: {
           currency: 'eur', // Force EUR only (no GBP or other currencies)
           product_data: {
-            name: `Reserva SeaBob #${bookingId}`,
-            description: 'Alquiler de SeaBob',
+            name: checkoutTitle,
+            description: checkoutDescription || 'Alquiler de SeaBob',
+            ...(productImage ? { images: [productImage] } : {}),
           },
           unit_amount: rentalAmount, // Convert to cents
         },
