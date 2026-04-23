@@ -56,6 +56,31 @@ const resolveWeekStart = (value?: string) => {
   return startOfWeek(parsed, WEEK_OPTIONS);
 };
 
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', 'true');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      textarea.style.pointerEvents = 'none';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return copied;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function AdminBookingActionsMenu({
   booking,
   isOpen,
@@ -607,8 +632,12 @@ export default function BookingsPage() {
   const copyContractLink = async (booking: Booking) => {
     try {
       const { url } = await ensureContractLink(booking);
-      await navigator.clipboard.writeText(url);
-      alert('Enlace del contrato copiado al portapapeles');
+      const copied = await copyToClipboard(url);
+      if (copied) {
+        alert('Enlace del contrato copiado al portapapeles');
+      } else {
+        window.prompt('Copia manualmente el enlace del contrato:', url);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo generar el enlace del contrato';
       alert(message);
@@ -659,8 +688,12 @@ export default function BookingsPage() {
   const copyPaymentLink = async (booking: Booking) => {
     try {
       const url = await ensurePaymentLink(booking);
-      await navigator.clipboard.writeText(url);
-      alert('Enlace de pago copiado al portapapeles');
+      const copied = await copyToClipboard(url);
+      if (copied) {
+        alert('Enlace de pago copiado al portapapeles');
+      } else {
+        window.prompt('Copia manualmente el enlace de pago:', url);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo generar el enlace de pago';
       alert(message);
@@ -672,13 +705,17 @@ export default function BookingsPage() {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  const copyText = (text: string, label: string) => {
+  const copyText = async (text: string, label: string) => {
     if (!text) {
       alert('No hay información para copiar.');
       return;
     }
-    navigator.clipboard.writeText(text);
-    alert(`${label} copiado al portapapeles`);
+    const copied = await copyToClipboard(text);
+    if (copied) {
+      alert(`${label} copiado al portapapeles`);
+    } else {
+      window.prompt(`Copia manualmente ${label.toLowerCase()}:`, text);
+    }
   };
 
   const getLocationLabel = (booking: Booking) => {
@@ -1585,7 +1622,7 @@ export default function BookingsPage() {
                             {booking.hora_entrega ? ` · ${booking.hora_entrega}` : ''}
                           </div>
                           <div className="truncate text-sm text-slate-500">
-                            {agentName} · {productsSummary}
+                            {productsSummary}
                           </div>
                           {isToday && (
                             <span className="inline-flex items-center gap-1 rounded-md bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">
@@ -1827,7 +1864,11 @@ function BookingDetailsModal({
     ].join('\n');
 
     try {
-      await navigator.clipboard.writeText(text);
+      const copied = await copyToClipboard(text);
+      if (!copied) {
+        window.prompt('Copia manualmente fechas y entrega:', text);
+        return;
+      }
       alert('Fechas y entrega copiadas.');
     } catch {
       alert('No se pudo copiar automáticamente.');

@@ -85,8 +85,10 @@ export async function POST(request: NextRequest) {
 
     const rentalAmount = Math.round(totalDue * 100);
 
-    const resolvedEmail = booking.cliente?.email;
+    const resolvedEmail = booking.cliente?.email?.trim();
     const resolvedName = booking.cliente?.nombre;
+    const normalizedCustomerEmail =
+      resolvedEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolvedEmail) ? resolvedEmail : null;
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL ||
       request.headers.get('origin') ||
@@ -135,7 +137,7 @@ export async function POST(request: NextRequest) {
       mode: 'payment',
       payment_method_types: ['card'], // Card payment (Apple Pay & Google Pay show automatically when available)
       line_items: lineItems,
-      customer_email: resolvedEmail,
+      ...(normalizedCustomerEmail ? { customer_email: normalizedCustomerEmail } : {}),
       metadata: {
         booking_id: bookingId,
         customer_name: resolvedName || '',
