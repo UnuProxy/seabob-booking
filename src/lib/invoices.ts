@@ -96,7 +96,7 @@ export const buildInvoiceFromBooking = (
   const amountVat = roundMoney(lines.reduce((sum, line) => sum + line.vat_amount, 0));
   const amountNet = roundMoney(lines.reduce((sum, line) => sum + line.net_amount, 0));
 
-  return {
+  const payload: Omit<Invoice, 'id' | 'created_at'> = {
     booking_id: booking.id,
     booking_ref: booking.numero_reserva,
     invoice_number: formatInvoiceNumber(sequenceNumber),
@@ -112,12 +112,21 @@ export const buildInvoiceFromBooking = (
     amount_net: amountNet,
     amount_vat: amountVat,
     amount_gross: amountGross,
-    payment_method: booking.pago_metodo,
-    payment_reference: booking.pago_referencia,
-    paid_at: booking.pago_realizado_en,
     lines,
     created_by: createdBy,
   };
+
+  if (booking.pago_metodo) {
+    payload.payment_method = booking.pago_metodo;
+  }
+  if (booking.pago_referencia) {
+    payload.payment_reference = booking.pago_referencia;
+  }
+  if (booking.pago_realizado_en) {
+    payload.paid_at = booking.pago_realizado_en;
+  }
+
+  return payload;
 };
 
 const scaleRefundLine = (line: InvoiceLine, ratio: number): InvoiceLine => {
@@ -149,7 +158,7 @@ export const buildRefundInvoiceFromBooking = (
   const amountVat = roundMoney(lines.reduce((sum, line) => sum + line.vat_amount, 0));
   const amountNet = roundMoney(lines.reduce((sum, line) => sum + line.net_amount, 0));
 
-  return {
+  const payload: Omit<Invoice, 'id' | 'created_at'> = {
     booking_id: booking.id,
     booking_ref: booking.numero_reserva,
     invoice_number: formatInvoiceNumber(sequenceNumber),
@@ -165,13 +174,30 @@ export const buildRefundInvoiceFromBooking = (
     amount_net: amountNet,
     amount_vat: amountVat,
     amount_gross: amountGross,
-    payment_method: booking.reembolso_metodo || booking.pago_metodo,
-    payment_reference: booking.reembolso_referencia || booking.pago_referencia,
-    paid_at: booking.reembolso_fecha || booking.pago_realizado_en,
     refund_reason: booking.reembolso_motivo || 'Refund / credit note',
-    related_invoice_id: originalInvoice.id,
-    related_invoice_number: originalInvoice.invoice_number,
     lines,
     created_by: createdBy,
   };
+
+  const refundMethod = booking.reembolso_metodo || booking.pago_metodo;
+  const refundReference = booking.reembolso_referencia || booking.pago_referencia;
+  const paidAt = booking.reembolso_fecha || booking.pago_realizado_en;
+
+  if (refundMethod) {
+    payload.payment_method = refundMethod;
+  }
+  if (refundReference) {
+    payload.payment_reference = refundReference;
+  }
+  if (paidAt) {
+    payload.paid_at = paidAt;
+  }
+  if (originalInvoice.id) {
+    payload.related_invoice_id = originalInvoice.id;
+  }
+  if (originalInvoice.invoice_number) {
+    payload.related_invoice_number = originalInvoice.invoice_number;
+  }
+
+  return payload;
 };
