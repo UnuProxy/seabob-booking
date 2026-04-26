@@ -122,6 +122,7 @@ export interface Booking {
     email: string;
     telefono: string;
     whatsapp: string;
+    documento_identidad?: string;
   };
   broker_id?: string;
   agency_id?: string;

@@ -993,11 +993,6 @@ export default function ContractPage() {
                       : 'This booking requires the client nautical licence. It can be added later from the back office.'}
                 </div>
               )}
-              {booking.notas && (
-                <div className="text-sm text-gray-600">
-                  <span className="font-semibold text-gray-800">{copy.labels.notes}:</span> {booking.notas}
-                </div>
-              )}
             </div>
           </section>
 
