@@ -6,6 +6,10 @@ export function getPublicContractUrl(origin: string, bookingId: string, token: s
   return `${origin}/contract/${bookingId}?t=${encodeURIComponent(token)}`;
 }
 
+export function getPublicPaymentUrl(origin: string, bookingId: string, token: string) {
+  return `${origin}/pay/${bookingId}?t=${encodeURIComponent(token)}`;
+}
+
 export function getAdminContractPath(bookingId: string, token?: string | null) {
   const params = new URLSearchParams();
   if (token) {

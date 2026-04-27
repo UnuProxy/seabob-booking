@@ -122,6 +122,8 @@ export interface Booking {
     email: string;
     telefono: string;
     whatsapp: string;
+    documento_identidad?: string;
+    direccion?: string;
   };
   broker_id?: string;
   agency_id?: string;
@@ -305,6 +307,8 @@ export interface Invoice {
   client_name: string;
   client_email?: string;
   client_phone?: string;
+  client_address?: string;
+  client_id_number?: string;
   amount_net: number;
   amount_vat: number;
   amount_gross: number;

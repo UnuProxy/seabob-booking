@@ -7,7 +7,7 @@ import { Booking, Product } from '@/types';
 import { BookingForm } from '@/components/bookings/BookingForm';
 import { NauticalLicenseManager } from '@/components/bookings/NauticalLicenseManager';
 import { BOOKING_FORM_MODAL_OPEN_KEY, clearBookingDraftStorage } from '@/lib/bookingDraft';
-import { ensureBookingAccessToken, getPublicContractUrl } from '@/lib/bookingAccess';
+import { ensureBookingAccessToken, getPublicContractUrl, getPublicPaymentUrl } from '@/lib/bookingAccess';
 import { shouldAutoExpireBooking } from '@/lib/bookingExpiration';
 import { useAuthStore } from '@/store/authStore';
 import { releaseBookingStockOnce } from '@/lib/bookingStock';
@@ -449,11 +449,12 @@ export default function BrokerReservasPage() {
           stripe_payment_link: data.url,
           stripe_checkout_session_id: data.sessionId,
         });
-        const copied = await copyToClipboard(data.url);
+        const paymentUrl = getPublicPaymentUrl(window.location.origin, booking.id, token);
+        const copied = await copyToClipboard(paymentUrl);
         if (copied) {
           showFeedback('success', 'Enlace de pago generado y copiado');
         } else {
-          window.prompt('Copia manualmente el enlace de pago:', data.url);
+          window.prompt('Copia manualmente el enlace de pago:', paymentUrl);
         }
       } else {
         showFeedback('error', 'No se recibió enlace de pago');
@@ -903,6 +904,7 @@ export default function BrokerReservasPage() {
                   <p className="text-sm"><span className="font-semibold text-slate-700">Nombre:</span> {viewingBooking.cliente.nombre}</p>
                   <p className="text-sm"><span className="font-semibold text-slate-700">Email:</span> {viewingBooking.cliente.email}</p>
                   <p className="text-sm"><span className="font-semibold text-slate-700">Teléfono:</span> {viewingBooking.cliente.telefono}</p>
+                  <p className="text-sm"><span className="font-semibold text-slate-700">Passport / ID:</span> {viewingBooking.cliente.documento_identidad || 'Sin documento'}</p>
                 </div>
               </div>
 

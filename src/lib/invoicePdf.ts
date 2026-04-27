@@ -106,16 +106,19 @@ export function downloadInvoicePdf(invoice: Invoice) {
     pdf.text(`Payment method: ${invoice.payment_method}`, margin, y + 19);
   }
   pdf.setTextColor(...ink);
-  pdf.text(invoice.client_name || 'Client', 110, y + 7);
-  if (invoice.client_email) {
-    pdf.setTextColor(...muted);
-    pdf.text(invoice.client_email, 110, y + 13);
-  }
-  if (invoice.client_phone) {
-    pdf.text(invoice.client_phone, 110, y + 19);
-  }
+  const billToLines = [
+    invoice.client_name || 'Client',
+    invoice.client_id_number ? `ID: ${invoice.client_id_number}` : '',
+    invoice.client_address ? `Address: ${invoice.client_address}` : '',
+    invoice.client_email || '',
+    invoice.client_phone || '',
+  ].filter(Boolean);
+  billToLines.forEach((line, index) => {
+    pdf.setTextColor(index === 0 ? ink[0] : muted[0], index === 0 ? ink[1] : muted[1], index === 0 ? ink[2] : muted[2]);
+    pdf.text(line, 110, y + 7 + index * 6);
+  });
 
-  y = 132;
+  y = 140;
   pdf.setFillColor(238, 241, 251);
   pdf.rect(margin, y, 178, 10, 'F');
   pdf.setFont('helvetica', 'bold');
@@ -171,18 +174,15 @@ export function downloadInvoicePdf(invoice: Invoice) {
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(11);
   pdf.setTextColor(...ink);
-  pdf.text('Payment information', margin, footerY + 9);
-  pdf.text('Notes', rightEdge, footerY + 9, { align: 'right' });
+  pdf.text('Payment status', margin, footerY + 9);
 
   pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(9.5);
   pdf.setTextColor(...muted);
   pdf.text(
     isRefundInvoice
-      ? `Refund reference: ${invoice.payment_reference || invoice.refund_reason || 'Refund issued'}`
-      : invoice.payment_reference
-        ? `Reference: ${invoice.payment_reference}`
-        : 'Reference: please quote the invoice number',
+      ? 'Refund issued'
+      : 'Payment confirmed',
     margin,
     footerY + 16
   );
@@ -195,8 +195,6 @@ export function downloadInvoicePdf(invoice: Invoice) {
     margin,
     footerY + 22
   );
-  pdf.text('Generated from SeaBob Center Ibiza admin', rightEdge, footerY + 16, { align: 'right' });
-  pdf.text(`Booking ${invoice.booking_ref}`, rightEdge, footerY + 22, { align: 'right' });
 
   pdf.save(`${invoice.invoice_number}.pdf`);
 }
