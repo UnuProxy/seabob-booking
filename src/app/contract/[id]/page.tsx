@@ -63,6 +63,8 @@ const CONTRACT_COPY = {
       name: 'Nombre',
       email: 'Email',
       phone: 'Teléfono',
+      idNumber: 'Passport / ID',
+      address: 'Dirección fiscal / domicilio',
       location: 'Ubicación',
       deliveryTime: 'Hora de Entrega',
       boat: 'Barco',
@@ -227,6 +229,8 @@ const CONTRACT_COPY = {
       name: 'Name',
       email: 'Email',
       phone: 'Phone',
+      idNumber: 'Passport / ID',
+      address: 'Billing / home address',
       location: 'Location',
       deliveryTime: 'Delivery Time',
       boat: 'Boat',
@@ -392,6 +396,8 @@ export default function ContractPage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [paymentSyncAttempted, setPaymentSyncAttempted] = useState(false);
+  const [clientDocument, setClientDocument] = useState('');
+  const [clientAddress, setClientAddress] = useState('');
   const requiresPayment = booking?.requires_payment !== false;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -428,6 +434,8 @@ export default function ContractPage() {
           }
 
           setBooking(data);
+          setClientDocument(data.cliente.documento_identidad || '');
+          setClientAddress(data.cliente.direccion || '');
           if (data.acuerdo_firmado) {
             setSuccess(true);
           }
@@ -680,6 +688,8 @@ export default function ContractPage() {
 
   const handleSubmit = async () => {
     if (!booking || !signature || !termsAccepted) return;
+    const nextClientDocument = clientDocument.trim();
+    const nextClientAddress = clientAddress.trim();
     if (booking.acuerdo_firmado) {
       alert(lang === 'es'
         ? 'Este contrato ya fue firmado y no puede volver a firmarse.'
@@ -695,13 +705,43 @@ export default function ContractPage() {
       return;
     }
 
+    if (!nextClientDocument || !nextClientAddress) {
+      alert(lang === 'es'
+        ? 'Añade tu Passport / ID y dirección antes de firmar. Son necesarios para la factura.'
+        : 'Add your Passport / ID and address before signing. They are required for the invoice.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       await updateDoc(doc(db, 'bookings', booking.id), {
+        cliente: {
+          ...booking.cliente,
+          documento_identidad: nextClientDocument,
+          direccion: nextClientAddress,
+        },
         acuerdo_firmado: true,
         firma_cliente: signature,
         terminos_aceptados: true,
         terminos_aceptados_en: serverTimestamp(),
+        estado: 'confirmada',
+      });
+      if (booking.invoice_id) {
+        await updateDoc(doc(db, 'invoices', booking.invoice_id), {
+          client_id_number: nextClientDocument,
+          client_address: nextClientAddress,
+        });
+      }
+      setBooking({
+        ...booking,
+        cliente: {
+          ...booking.cliente,
+          documento_identidad: nextClientDocument,
+          direccion: nextClientAddress,
+        },
+        acuerdo_firmado: true,
+        firma_cliente: signature,
+        terminos_aceptados: true,
         estado: 'confirmada',
       });
       setSuccess(true);
@@ -856,6 +896,47 @@ export default function ContractPage() {
                 <span className="font-semibold text-gray-900">
                   {booking.cliente.telefono || copy.labels.notProvided}
                 </span>
+              </div>
+              <div>
+                <span className="block text-gray-500">{copy.labels.idNumber}</span>
+                {booking.acuerdo_firmado ? (
+                  <span className="font-semibold text-gray-900">
+                    {booking.cliente.documento_identidad || copy.labels.notProvided}
+                  </span>
+                ) : (
+                  <input
+                    type="text"
+                    value={clientDocument}
+                    onChange={(event) => setClientDocument(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-semibold text-gray-900"
+                    placeholder={copy.labels.idNumber}
+                    required
+                  />
+                )}
+              </div>
+              <div className="md:col-span-2">
+                <span className="block text-gray-500">{copy.labels.address}</span>
+                {booking.acuerdo_firmado ? (
+                  <span className="font-semibold text-gray-900">
+                    {booking.cliente.direccion || copy.labels.notProvided}
+                  </span>
+                ) : (
+                  <input
+                    type="text"
+                    value={clientAddress}
+                    onChange={(event) => setClientAddress(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 font-semibold text-gray-900"
+                    placeholder={copy.labels.address}
+                    required
+                  />
+                )}
+                {!booking.acuerdo_firmado && (!clientDocument.trim() || !clientAddress.trim()) ? (
+                  <p className="mt-2 text-xs font-medium text-amber-700">
+                    {lang === 'es'
+                      ? 'Estos datos son necesarios para emitir la factura.'
+                      : 'These details are required for the invoice.'}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <span className="block text-gray-500">{copy.labels.startDate}</span>
@@ -1163,6 +1244,8 @@ export default function ContractPage() {
                 !signature ||
                 submitting ||
                 (requiresPayment && !booking.pago_realizado) ||
+                !clientDocument.trim() ||
+                !clientAddress.trim() ||
                 booking.acuerdo_firmado
               }
               className="btn-primary w-full py-4 text-lg disabled:opacity-50"

@@ -9,6 +9,7 @@ export const INVOICE_COMPANY = {
 } as const;
 
 const roundMoney = (value: number) => Math.round((Number(value) || 0) * 100) / 100;
+export const INITIAL_INVOICE_SEQUENCE = 1;
 
 const createLine = (
   type: InvoiceLine['type'],
@@ -41,7 +42,25 @@ const createLine = (
   };
 };
 
-export const formatInvoiceNumber = (sequence: number) => `AL-${String(sequence).padStart(4, '0')}`;
+export const formatInvoiceNumber = (sequence: number) => `AL-${String(sequence).padStart(3, '0')}`;
+
+const getRentalDescription = (booking: Booking) => {
+  const products = (booking.items || [])
+    .map((item) => {
+      const name = item.producto_nombre?.trim();
+      if (!name) return '';
+      return `${item.cantidad > 1 ? `x${item.cantidad} ` : ''}${name}`;
+    })
+    .filter(Boolean);
+
+  if (products.length > 0) {
+    return `Rental: ${products.join(', ')}`;
+  }
+
+  return `Booking ${booking.numero_reserva} rental service`;
+};
+
+const getClientAddress = (booking: Booking) => booking.cliente?.direccion?.trim() || '';
 
 export const buildInvoiceLinesFromBooking = (booking: Booking): InvoiceLine[] => {
   const lines: InvoiceLine[] = [];
@@ -57,7 +76,7 @@ export const buildInvoiceLinesFromBooking = (booking: Booking): InvoiceLine[] =>
     lines.push(
       createLine(
         'rental',
-        `Booking ${booking.numero_reserva} rental service`,
+        getRentalDescription(booking),
         rentalTotal,
         VAT_RATE
       )
@@ -109,6 +128,8 @@ export const buildInvoiceFromBooking = (
     client_name: booking.cliente?.nombre || 'Client',
     client_email: booking.cliente?.email || '',
     client_phone: booking.cliente?.telefono || '',
+    client_address: getClientAddress(booking),
+    client_id_number: booking.cliente?.documento_identidad || '',
     amount_net: amountNet,
     amount_vat: amountVat,
     amount_gross: amountGross,
@@ -171,6 +192,8 @@ export const buildRefundInvoiceFromBooking = (
     client_name: booking.cliente?.nombre || originalInvoice.client_name || 'Client',
     client_email: booking.cliente?.email || originalInvoice.client_email || '',
     client_phone: booking.cliente?.telefono || originalInvoice.client_phone || '',
+    client_address: getClientAddress(booking) || originalInvoice.client_address || '',
+    client_id_number: booking.cliente?.documento_identidad || originalInvoice.client_id_number || '',
     amount_net: amountNet,
     amount_vat: amountVat,
     amount_gross: amountGross,

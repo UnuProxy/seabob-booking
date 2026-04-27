@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -15,7 +15,7 @@ import {
 import { Download, FilePlus2, Receipt, RefreshCw, RotateCcw } from 'lucide-react';
 import { db } from '@/lib/firebase/config';
 import { downloadInvoicePdf } from '@/lib/invoicePdf';
-import { buildInvoiceFromBooking, buildRefundInvoiceFromBooking } from '@/lib/invoices';
+import { INITIAL_INVOICE_SEQUENCE, buildInvoiceFromBooking, buildRefundInvoiceFromBooking } from '@/lib/invoices';
 import { useAuthStore } from '@/store/authStore';
 import type { Booking, Invoice } from '@/types';
 
@@ -122,16 +122,22 @@ export default function FacturasPage() {
     [invoices]
   );
 
+  const hasStandardInvoiceForBooking = useCallback(
+    (booking: Booking) =>
+      standardInvoicesByBookingId.has(booking.id) || Boolean(booking.invoice_id || booking.invoice_number),
+    [standardInvoicesByBookingId]
+  );
+
   const paidPendingBookings = useMemo(
     () =>
       bookings
-        .filter((booking) => booking.pago_realizado && !standardInvoicesByBookingId.has(booking.id))
+        .filter((booking) => booking.pago_realizado && !hasStandardInvoiceForBooking(booking))
         .sort((a, b) => {
           const dateA = getDate(a.pago_realizado_en)?.getTime() || 0;
           const dateB = getDate(b.pago_realizado_en)?.getTime() || 0;
           return dateB - dateA;
         }),
-    [bookings, standardInvoicesByBookingId]
+    [bookings, hasStandardInvoiceForBooking]
   );
 
   const refundPendingBookings = useMemo(
@@ -140,7 +146,7 @@ export default function FacturasPage() {
         .filter(
           (booking) =>
             booking.reembolso_realizado &&
-            standardInvoicesByBookingId.has(booking.id) &&
+            hasStandardInvoiceForBooking(booking) &&
             !refundInvoicesByBookingId.has(booking.id)
         )
         .sort((a, b) => {
@@ -148,7 +154,7 @@ export default function FacturasPage() {
           const dateB = getDate(b.reembolso_fecha)?.getTime() || 0;
           return dateB - dateA;
         }),
-    [bookings, refundInvoicesByBookingId, standardInvoicesByBookingId]
+    [bookings, hasStandardInvoiceForBooking, refundInvoicesByBookingId]
   );
 
   const totals = useMemo(() => {
@@ -203,7 +209,7 @@ export default function FacturasPage() {
         }
 
         const counterSnap = await transaction.get(counterRef);
-        const nextSequence = Number(counterSnap.data()?.next_sequence ?? 0);
+        const nextSequence = Number(counterSnap.data()?.next_sequence ?? INITIAL_INVOICE_SEQUENCE);
         const invoicePayload = buildInvoiceFromBooking(latestBooking, nextSequence, user.id);
         const clientInvoice: Invoice = {
           id: latestBooking.id,
@@ -276,7 +282,7 @@ export default function FacturasPage() {
           ...originalInvoiceSnap.data(),
         } as Invoice;
         const counterSnap = await transaction.get(counterRef);
-        const nextSequence = Number(counterSnap.data()?.next_sequence ?? 0);
+        const nextSequence = Number(counterSnap.data()?.next_sequence ?? INITIAL_INVOICE_SEQUENCE);
         const invoicePayload = buildRefundInvoiceFromBooking(
           latestBooking,
           originalInvoice,
@@ -330,7 +336,7 @@ export default function FacturasPage() {
             <h1 className="mt-4 text-3xl font-black tracking-tight">Facturas de reservas pagadas</h1>
             <p className="mt-3 text-sm text-blue-100/80">
               Las facturas solo se generan cuando la reserva ya esta marcada como pagada. La numeracion
-              se asigna en orden estricto empezando por <span className="font-semibold text-white">AL-0000</span>.
+              se asigna en orden estricto empezando por <span className="font-semibold text-white">AL-001</span>.
             </p>
           </div>
 

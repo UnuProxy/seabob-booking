@@ -79,6 +79,8 @@ export default function PublicBookingPage() {
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
+  const [clientDocument, setClientDocument] = useState('');
+  const [clientAddress, setClientAddress] = useState('');
   const [notes, setNotes] = useState('');
 
   const now = new Date();
@@ -379,8 +381,8 @@ export default function PublicBookingPage() {
       return;
     }
 
-    if (!clientName.trim() || !clientEmail.trim()) {
-      setError('El nombre y el email son obligatorios.');
+    if (!clientName.trim() || !clientEmail.trim() || !clientDocument.trim() || !clientAddress.trim()) {
+      setError('El nombre, email, documento y dirección son obligatorios para la factura.');
       return;
     }
 
@@ -472,6 +474,8 @@ export default function PublicBookingPage() {
           email: clientEmail.trim(),
           telefono: clientPhone.trim(),
           whatsapp: clientPhone.trim(),
+          documento_identidad: clientDocument.trim(),
+          direccion: clientAddress.trim(),
         },
         items: itemsWithNames,
         fecha_inicio: startDate,
@@ -1160,6 +1164,32 @@ export default function PublicBookingPage() {
                     onChange={(e) => setClientPhone(e.target.value)}
                     className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="+34 600 000 000"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
+                    <User size={18} /> Passport / ID
+                  </span>
+                  <input
+                    type="text"
+                    value={clientDocument}
+                    onChange={(e) => setClientDocument(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Passport or ID number"
+                    required
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-2">
+                    <MapPin size={18} /> Dirección fiscal / domicilio
+                  </span>
+                  <input
+                    type="text"
+                    value={clientAddress}
+                    onChange={(e) => setClientAddress(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Home address"
+                    required
                   />
                 </label>
                 <label className="block md:col-span-2">

@@ -1798,6 +1798,7 @@ function BookingDetailsModal({
   const [clientEmail, setClientEmail] = useState(booking.cliente.email || '');
   const [clientPhone, setClientPhone] = useState(booking.cliente.telefono || '');
   const [clientDocument, setClientDocument] = useState(booking.cliente.documento_identidad || '');
+  const [clientAddress, setClientAddress] = useState(booking.cliente.direccion || '');
   const [savingClient, setSavingClient] = useState(false);
   const [clientFeedback, setClientFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [adminNote, setAdminNote] = useState(booking.notas || '');
@@ -1809,6 +1810,7 @@ function BookingDetailsModal({
     setClientEmail(booking.cliente.email || '');
     setClientPhone(booking.cliente.telefono || '');
     setClientDocument(booking.cliente.documento_identidad || '');
+    setClientAddress(booking.cliente.direccion || '');
     setClientFeedback(null);
     setAdminNote(booking.notas || '');
     setAdminNoteFeedback(null);
@@ -1818,13 +1820,15 @@ function BookingDetailsModal({
     clientName !== (booking.cliente.nombre || '') ||
     clientEmail !== (booking.cliente.email || '') ||
     clientPhone !== (booking.cliente.telefono || '') ||
-    clientDocument !== (booking.cliente.documento_identidad || '');
+    clientDocument !== (booking.cliente.documento_identidad || '') ||
+    clientAddress !== (booking.cliente.direccion || '');
 
   const saveClientDetails = async () => {
     const nextName = clientName.trim();
     const nextEmail = clientEmail.trim();
     const nextPhone = clientPhone.trim();
     const nextDocument = clientDocument.trim();
+    const nextAddress = clientAddress.trim();
 
     if (!nextName) {
       setClientFeedback({ type: 'error', message: 'El nombre del cliente es obligatorio.' });
@@ -1843,14 +1847,26 @@ function BookingDetailsModal({
           telefono: nextPhone,
           whatsapp: nextPhone,
           documento_identidad: nextDocument,
+          direccion: nextAddress,
         },
         updated_at: serverTimestamp(),
       });
+
+      if (booking.invoice_id) {
+        await updateDoc(doc(db, 'invoices', booking.invoice_id), {
+          client_name: nextName,
+          client_email: nextEmail,
+          client_phone: nextPhone,
+          client_id_number: nextDocument,
+          client_address: nextAddress,
+        });
+      }
 
       setClientName(nextName);
       setClientEmail(nextEmail);
       setClientPhone(nextPhone);
       setClientDocument(nextDocument);
+      setClientAddress(nextAddress);
       setClientFeedback({ type: 'success', message: 'Cliente actualizado correctamente.' });
     } catch (error) {
       console.error('Error updating booking client:', error);
@@ -1994,6 +2010,19 @@ function BookingDetailsModal({
                   }}
                   className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-900"
                   placeholder="Sin documento"
+                />
+              </div>
+              <div className="col-span-2">
+                <span className="text-xs text-gray-500 uppercase font-semibold">Dirección cliente</span>
+                <input
+                  type="text"
+                  value={clientAddress}
+                  onChange={(event) => {
+                    setClientAddress(event.target.value);
+                    if (clientFeedback) setClientFeedback(null);
+                  }}
+                  className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-gray-900"
+                  placeholder="Sin dirección"
                 />
               </div>
               {clientFeedback && (

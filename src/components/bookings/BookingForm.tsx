@@ -41,6 +41,7 @@ interface BookingFormDraft {
   clientEmail: string;
   clientPhone: string;
   clientDocument: string;
+  clientAddress: string;
   startDate: string;
   endDate: string;
   isMultiDay: boolean;
@@ -90,6 +91,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientDocument, setClientDocument] = useState('');
+  const [clientAddress, setClientAddress] = useState('');
   
   const now = new Date();
   const isPastCutoff = now.getHours() >= 17;
@@ -147,6 +149,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       setClientEmail(typeof draft.clientEmail === 'string' ? draft.clientEmail : '');
       setClientPhone(typeof draft.clientPhone === 'string' ? draft.clientPhone : '');
       setClientDocument(typeof draft.clientDocument === 'string' ? draft.clientDocument : '');
+      setClientAddress(typeof draft.clientAddress === 'string' ? draft.clientAddress : '');
       setStartDate(typeof draft.startDate === 'string' ? draft.startDate : minDateStr);
       setEndDate(typeof draft.endDate === 'string' ? draft.endDate : minDateStr);
       setIsMultiDay(Boolean(draft.isMultiDay));
@@ -208,6 +211,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       clientEmail,
       clientPhone,
       clientDocument,
+      clientAddress,
       startDate,
       endDate,
       isMultiDay,
@@ -235,6 +239,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
     boatName,
     clientEmail,
     clientDocument,
+    clientAddress,
     clientName,
     clientPhone,
     currentStep,
@@ -704,6 +709,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
           telefono: clientPhone,
           whatsapp: clientPhone,
           documento_identidad: clientDocument.trim(),
+          direccion: clientAddress.trim(),
         },
         items: itemsWithNames,
         fecha_inicio: startDate,
@@ -1123,6 +1129,16 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                         onChange={(e) => setClientEmail(e.target.value)}
                         className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
                         placeholder="Email"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">Dirección cliente</label>
+                      <input
+                        type="text"
+                        value={clientAddress}
+                        onChange={(e) => setClientAddress(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                        placeholder="Dirección fiscal o domicilio"
                       />
                     </div>
                   </div>
