@@ -5,7 +5,6 @@ import {
   collection,
   doc,
   documentId,
-  getDoc,
   getDocs,
   query,
   serverTimestamp,
@@ -421,18 +420,13 @@ export default function ContractPage() {
     const fetchBooking = async () => {
       try {
         if (!id) return;
-        const docRef = doc(db, 'bookings', id);
-        const docSnap = await getDoc(docRef);
+        const response = await fetch(
+          `/api/bookings/contract?bookingId=${encodeURIComponent(id)}&token=${encodeURIComponent(token || '')}`
+        );
+        const payload = (await response.json().catch(() => ({}))) as { booking?: Booking };
 
-        if (docSnap.exists()) {
-          const data = { id: docSnap.id, ...docSnap.data() } as Booking;
-
-          if (data.token_acceso && data.token_acceso !== token) {
-            setErrorKey('invalid');
-            setLoading(false);
-            return;
-          }
-
+        if (response.ok && payload.booking) {
+          const data = payload.booking;
           setBooking(data);
           setClientDocument(data.cliente.documento_identidad || '');
           setClientAddress(data.cliente.direccion || '');
@@ -469,7 +463,7 @@ export default function ContractPage() {
             }, 2000);
           }
         } else {
-          setErrorKey('notFound');
+          setErrorKey(response.status === 404 ? 'notFound' : response.status === 403 ? 'invalid' : 'loadError');
         }
       } catch (err) {
         console.error(err);
@@ -714,36 +708,26 @@ export default function ContractPage() {
 
     setSubmitting(true);
     try {
-      await updateDoc(doc(db, 'bookings', booking.id), {
-        cliente: {
-          ...booking.cliente,
-          documento_identidad: nextClientDocument,
-          direccion: nextClientAddress,
-        },
-        acuerdo_firmado: true,
-        firma_cliente: signature,
-        terminos_aceptados: true,
-        terminos_aceptados_en: serverTimestamp(),
-        estado: 'confirmada',
+      const response = await fetch('/api/bookings/contract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: booking.id,
+          token,
+          signature,
+          clientDocument: nextClientDocument,
+          clientAddress: nextClientAddress,
+        }),
       });
-      if (booking.invoice_id) {
-        await updateDoc(doc(db, 'invoices', booking.invoice_id), {
-          client_id_number: nextClientDocument,
-          client_address: nextClientAddress,
-        });
+
+      if (!response.ok) {
+        throw new Error('Contract signing failed.');
       }
-      setBooking({
-        ...booking,
-        cliente: {
-          ...booking.cliente,
-          documento_identidad: nextClientDocument,
-          direccion: nextClientAddress,
-        },
-        acuerdo_firmado: true,
-        firma_cliente: signature,
-        terminos_aceptados: true,
-        estado: 'confirmada',
-      });
+
+      const payload = (await response.json().catch(() => ({}))) as { booking?: Booking };
+      if (payload.booking) {
+        setBooking(payload.booking);
+      }
       setSuccess(true);
     } catch (err) {
       console.error(err);
