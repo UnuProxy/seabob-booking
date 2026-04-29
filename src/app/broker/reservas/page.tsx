@@ -499,7 +499,8 @@ export default function BrokerReservasPage() {
     const matchesSearch = 
       booking.cliente.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
       booking.numero_reserva.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      booking.cliente.email.toLowerCase().includes(searchTerm.toLowerCase());
+      booking.cliente.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (booking.creado_por_nombre || '').toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesStatus = statusFilter === 'all' || booking.estado === statusFilter;
 
@@ -791,6 +792,11 @@ export default function BrokerReservasPage() {
                               Creada{' '}
                               {format(getDate(booking.creado_en), 'd MMM yyyy', { locale: es })}
                             </p>
+                            {booking.creado_por_nombre ? (
+                              <p className="mt-1 text-xs font-medium text-slate-500">
+                                Creada por: {booking.creado_por_nombre}
+                              </p>
+                            ) : null}
                             {placeTime ? (
                               <p className="mt-1.5 text-xs text-slate-500">{placeTime}</p>
                             ) : null}
@@ -896,6 +902,12 @@ export default function BrokerReservasPage() {
                     {getStatusLabel(viewingBooking.estado)}
                   </span>
                 </div>
+                {viewingBooking.creado_por_nombre ? (
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 uppercase">Creada por</label>
+                    <p className="text-lg font-bold text-slate-900">{viewingBooking.creado_por_nombre}</p>
+                  </div>
+                ) : null}
               </div>
 
               <div>

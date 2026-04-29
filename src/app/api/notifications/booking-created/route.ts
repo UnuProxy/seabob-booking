@@ -162,6 +162,7 @@ export async function POST(request: NextRequest) {
           <li><strong>Total:</strong> €${Number(booking.precio_total || 0).toFixed(2)}</li>
           <li><strong>Origen:</strong> ${sourceLabel}</li>
           ${partnerName ? `<li><strong>${createdByLabel}:</strong> ${partnerName}</li>` : ''}
+          ${booking.creado_por_nombre ? `<li><strong>Persona interna:</strong> ${booking.creado_por_nombre}</li>` : ''}
         </ul>
         <p style="margin-top: 20px;">
           <a
@@ -183,6 +184,7 @@ export async function POST(request: NextRequest) {
       `Total: €${Number(booking.precio_total || 0).toFixed(2)}`,
       `Origen: ${sourceLabel}`,
       partnerName ? `${createdByLabel}: ${partnerName}` : null,
+      booking.creado_por_nombre ? `Persona interna: ${booking.creado_por_nombre}` : null,
       '',
       `Abrir en admin: ${adminLink}`,
     ]

@@ -42,6 +42,7 @@ interface BookingFormDraft {
   clientPhone: string;
   clientDocument: string;
   clientAddress: string;
+  creatorName: string;
   startDate: string;
   endDate: string;
   isMultiDay: boolean;
@@ -92,6 +93,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
   const [clientPhone, setClientPhone] = useState('');
   const [clientDocument, setClientDocument] = useState('');
   const [clientAddress, setClientAddress] = useState('');
+  const [creatorName, setCreatorName] = useState('');
   
   const now = new Date();
   const isPastCutoff = now.getHours() >= 17;
@@ -150,6 +152,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       setClientPhone(typeof draft.clientPhone === 'string' ? draft.clientPhone : '');
       setClientDocument(typeof draft.clientDocument === 'string' ? draft.clientDocument : '');
       setClientAddress(typeof draft.clientAddress === 'string' ? draft.clientAddress : '');
+      setCreatorName(typeof draft.creatorName === 'string' ? draft.creatorName : '');
       setStartDate(typeof draft.startDate === 'string' ? draft.startDate : minDateStr);
       setEndDate(typeof draft.endDate === 'string' ? draft.endDate : minDateStr);
       setIsMultiDay(Boolean(draft.isMultiDay));
@@ -212,6 +215,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
       clientPhone,
       clientDocument,
       clientAddress,
+      creatorName,
       startDate,
       endDate,
       isMultiDay,
@@ -240,6 +244,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
     clientEmail,
     clientDocument,
     clientAddress,
+    creatorName,
     clientName,
     clientPhone,
     currentStep,
@@ -756,6 +761,7 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
         notas: notes,
         creado_en: serverTimestamp(),
         creado_por: user.id,
+        creado_por_nombre: creatorName.trim(),
         origen: 'panel',
         ...(token ? { token_acceso: token } : {}),
         ...(partnerType === 'directo' ? { cliente_directo: true } : {}),
@@ -1140,6 +1146,21 @@ export function BookingForm({ onClose, onSuccess, initialSelectedProductId }: Bo
                         className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
                         placeholder="Dirección fiscal o domicilio"
                       />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="mb-2 block text-sm font-semibold text-slate-700">
+                        Persona que crea la reserva
+                      </label>
+                      <input
+                        type="text"
+                        value={creatorName}
+                        onChange={(e) => setCreatorName(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-lg text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                        placeholder="Nombre interno del empleado"
+                      />
+                      <p className="mt-1 text-xs text-slate-500">
+                        Visible para el broker/agencia y para admin. Útil cuando varias personas usan el mismo acceso.
+                      </p>
                     </div>
                   </div>
                 </section>
