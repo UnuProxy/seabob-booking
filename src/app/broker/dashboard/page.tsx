@@ -251,6 +251,61 @@ export default function BrokerDashboard() {
         </div>
       </div>
 
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+        <div className="flex items-center justify-between gap-3 mb-5">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">Productos</h2>
+            <p className="text-sm text-slate-600">
+              Consulta una ficha rápida del producto y empieza una reserva desde aquí.
+            </p>
+          </div>
+          <Link href="/broker/reservas?new=true" className="text-sm font-medium text-blue-600 hover:text-blue-700">
+            Ir a reservas
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {products.map((product) => (
+            <button
+              key={product.id}
+              type="button"
+              onClick={() => setSelectedProduct(product)}
+              className="overflow-hidden rounded-2xl border border-gray-200 bg-white text-left transition-shadow hover:shadow-md"
+            >
+              <div className="h-40 bg-slate-100">
+                {product.imagen_url ? (
+                  <img src={product.imagen_url} alt={product.nombre} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-slate-400">
+                    <Package size={30} />
+                  </div>
+                )}
+              </div>
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900">{product.nombre}</h3>
+                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{getProductTypeLabel(product.tipo)}</p>
+                  </div>
+                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${product.activo ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
+                    {product.activo ? 'Activo' : 'Inactivo'}
+                  </span>
+                </div>
+                <p className="mt-3 line-clamp-2 text-sm text-slate-600">{product.descripcion || 'Sin descripción.'}</p>
+                <div className="mt-4 flex items-end justify-between gap-3">
+                  <div>
+                    <p className="text-2xl font-bold text-slate-900">{formatPrice(getProductBaseDailyPrice(product))}</p>
+                    <p className="text-xs text-slate-500">Precio sin IVA</p>
+                    <p className="mt-2 text-sm font-semibold text-emerald-700">IVA se aplica en la reserva</p>
+                  </div>
+                  <span className="text-sm font-medium text-blue-600">Ver info</span>
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Recent Bookings */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200">
@@ -326,61 +381,6 @@ export default function BrokerDashboard() {
               No hay reservas aún. Crea tu primera reserva para comenzar.
             </div>
           )}
-        </div>
-      </div>
-
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-6">
-        <div className="flex items-center justify-between gap-3 mb-5">
-          <div>
-            <h2 className="text-xl font-bold text-slate-900">Productos</h2>
-            <p className="text-sm text-slate-600">
-              Consulta una ficha rápida del producto y empieza una reserva desde aquí.
-            </p>
-          </div>
-          <Link href="/broker/reservas?new=true" className="text-sm font-medium text-blue-600 hover:text-blue-700">
-            Ir a reservas
-          </Link>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {products.map((product) => (
-            <button
-              key={product.id}
-              type="button"
-              onClick={() => setSelectedProduct(product)}
-              className="overflow-hidden rounded-2xl border border-gray-200 bg-white text-left transition-shadow hover:shadow-md"
-            >
-              <div className="h-40 bg-slate-100">
-                {product.imagen_url ? (
-                  <img src={product.imagen_url} alt={product.nombre} className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-slate-400">
-                    <Package size={30} />
-                  </div>
-                )}
-              </div>
-              <div className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold text-slate-900">{product.nombre}</h3>
-                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-slate-500">{getProductTypeLabel(product.tipo)}</p>
-                  </div>
-                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${product.activo ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-600'}`}>
-                    {product.activo ? 'Activo' : 'Inactivo'}
-                  </span>
-                </div>
-                <p className="mt-3 line-clamp-2 text-sm text-slate-600">{product.descripcion || 'Sin descripción.'}</p>
-                <div className="mt-4 flex items-end justify-between gap-3">
-                  <div>
-                    <p className="text-2xl font-bold text-slate-900">{formatPrice(getProductBaseDailyPrice(product))}</p>
-                    <p className="text-xs text-slate-500">Precio sin IVA</p>
-                    <p className="mt-2 text-sm font-semibold text-emerald-700">IVA se aplica en la reserva</p>
-                  </div>
-                  <span className="text-sm font-medium text-blue-600">Ver info</span>
-                </div>
-              </div>
-            </button>
-          ))}
         </div>
       </div>
 
