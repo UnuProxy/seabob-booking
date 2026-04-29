@@ -814,6 +814,7 @@ export default function BookingsPage() {
         getLocationLabel(booking),
         booking.notas,
         booking.partner_internal_note,
+        booking.creado_por_nombre,
         booking.token_acceso,
         productsText,
       ].filter(Boolean).join(' '));
@@ -1399,6 +1400,11 @@ export default function BookingsPage() {
                               {agentType}: {agentName}
                             </div>
                           ) : null}
+                          {booking.creado_por_nombre ? (
+                            <div className="mt-1 text-xs font-medium text-slate-500">
+                              Creada por: {booking.creado_por_nombre}
+                            </div>
+                          ) : null}
                         </div>
                         <div>
                           <div className="text-xs uppercase text-gray-500 font-semibold">Total</div>
@@ -1430,6 +1436,11 @@ export default function BookingsPage() {
                               <div className="text-xs uppercase text-gray-500 font-semibold">Agente</div>
                               <div className="text-gray-900 font-medium">{getAgentName(booking)}</div>
                               <div className="text-xs text-gray-500">{getAgentType(booking)}</div>
+                              {booking.creado_por_nombre ? (
+                                <div className="mt-1 text-xs font-medium text-slate-600">
+                                  Persona: {booking.creado_por_nombre}
+                                </div>
+                              ) : null}
                             </div>
                             <div>
                               <div className="text-xs uppercase text-gray-500 font-semibold">Pago</div>
@@ -1612,6 +1623,11 @@ export default function BookingsPage() {
                             </span>
                             Creada: {format(getDate(booking.creado_en), 'd MMM yyyy', { locale: es })}
                           </p>
+                          {booking.creado_por_nombre ? (
+                            <p className="text-xs font-medium text-slate-500">
+                              Creada por: {booking.creado_por_nombre}
+                            </p>
+                          ) : null}
                           <p className="text-sm text-slate-600">{formatBookingServiceDateRange(booking)}</p>
                           <div className="truncate text-sm text-slate-500">
                             {getLocationLabel(booking)}
@@ -2060,6 +2076,11 @@ function BookingDetailsModal({
                 <div>
                   <div className="font-bold text-gray-900">{getAgentName(booking)}</div>
                   <div className="text-sm text-gray-500">{getAgentType(booking)}</div>
+                  {booking.creado_por_nombre ? (
+                    <div className="mt-1 text-sm font-medium text-slate-700">
+                      Persona interna: {booking.creado_por_nombre}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>

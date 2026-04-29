@@ -203,6 +203,7 @@ export interface Booking {
   estado: BookingStatus;
   acuerdo_firmado: boolean;
   creado_por?: string;
+  creado_por_nombre?: string;
   pdf_acuerdo_url?: string;
   notas?: string;
   partner_internal_note?: string;
